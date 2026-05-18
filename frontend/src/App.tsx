@@ -37,6 +37,14 @@ export default function App() {
   const [rebound, setRebound] = useState<ScreenerResult[]>([]);
   const [status, setStatus] = useState("加载中");
 
+  const reloadPortfolio = () => {
+    return Promise.all([api.summary(), api.positions()])
+      .then(([summaryData, positionData]) => {
+        setSummary(summaryData);
+        setPositions(positionData);
+      });
+  };
+
   useEffect(() => {
     Promise.all([api.summary(), api.positions(), api.screener("trend"), api.screener("rebound")])
       .then(([summaryData, positionData, trendData, reboundData]) => {
@@ -85,6 +93,7 @@ export default function App() {
           period={period}
           onSelectSymbol={setSelectedSymbol}
           onPeriodChange={setPeriod}
+          onPortfolioChange={reloadPortfolio}
         />
       )}
       {tab === "screener" && (
@@ -112,8 +121,41 @@ function HomePage(props: {
   period: string;
   onSelectSymbol: (symbol: string) => void;
   onPeriodChange: (period: string) => void;
+  onPortfolioChange: () => Promise<void>;
 }) {
   const selectedPosition = props.positions.find((position) => position.symbol === props.selectedSymbol);
+  const [cashValue, setCashValue] = useState(String(Math.round(props.summary.cash)));
+  const [positionForm, setPositionForm] = useState({
+    symbol: "",
+    name: "",
+    quantity: "",
+    average_cost: "",
+  });
+  const [formStatus, setFormStatus] = useState("");
+
+  useEffect(() => {
+    setCashValue(String(Math.round(props.summary.cash)));
+  }, [props.summary.cash]);
+
+  const saveCash = async () => {
+    await api.updateCash(Number(cashValue));
+    await props.onPortfolioChange();
+    setFormStatus("现金已更新");
+  };
+
+  const savePosition = async () => {
+    await api.upsertPosition({
+      symbol: positionForm.symbol.trim(),
+      name: positionForm.name.trim(),
+      quantity: Number(positionForm.quantity),
+      average_cost: Number(positionForm.average_cost),
+    });
+    await props.onPortfolioChange();
+    props.onSelectSymbol(positionForm.symbol.trim());
+    setPositionForm({ symbol: "", name: "", quantity: "", average_cost: "" });
+    setFormStatus("持仓已保存");
+  };
+
   return (
     <>
       <section className="metrics-grid">
@@ -146,6 +188,35 @@ function HomePage(props: {
                 </span>
               </button>
             ))}
+          </div>
+          <div className="entry-form">
+            <h3>账户录入</h3>
+            <label>
+              可用现金
+              <input value={cashValue} onChange={(event) => setCashValue(event.target.value)} inputMode="decimal" />
+            </label>
+            <button onClick={saveCash}>保存现金</button>
+            <h3>持仓录入</h3>
+            <label>
+              代码
+              <input value={positionForm.symbol} onChange={(event) => setPositionForm({ ...positionForm, symbol: event.target.value })} placeholder="300308" />
+            </label>
+            <label>
+              名称
+              <input value={positionForm.name} onChange={(event) => setPositionForm({ ...positionForm, name: event.target.value })} placeholder="中际旭创" />
+            </label>
+            <label>
+              数量
+              <input value={positionForm.quantity} onChange={(event) => setPositionForm({ ...positionForm, quantity: event.target.value })} inputMode="numeric" />
+            </label>
+            <label>
+              买入均价
+              <input value={positionForm.average_cost} onChange={(event) => setPositionForm({ ...positionForm, average_cost: event.target.value })} inputMode="decimal" />
+            </label>
+            <button onClick={savePosition} disabled={!positionForm.symbol || !positionForm.name || !positionForm.quantity || !positionForm.average_cost}>
+              保存持仓
+            </button>
+            {formStatus && <p>{formStatus}</p>}
           </div>
         </aside>
 

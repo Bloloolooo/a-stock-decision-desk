@@ -1,10 +1,23 @@
 from datetime import date, datetime, timedelta
 from math import sin
+import os
+from typing import Protocol
 
 from app.schemas import PriceBar
 
 
-class SampleMarketData:
+class MarketDataProvider(Protocol):
+    def latest_price(self, symbol: str) -> float:
+        ...
+
+    def name(self, symbol: str) -> str:
+        ...
+
+    def bars(self, symbol: str, period: str = "daily", adjust: str = "qfq") -> list[PriceBar]:
+        ...
+
+
+class SampleMarketDataProvider:
     names = {
         "300308": "中际旭创",
         "300750": "宁德时代",
@@ -60,4 +73,68 @@ class SampleMarketData:
         return bars
 
 
-sample_market_data = SampleMarketData()
+class AkShareMarketDataProvider:
+    period_map = {
+        "daily": "daily",
+        "weekly": "weekly",
+        "monthly": "monthly",
+        "5d": "daily",
+        "intraday": "daily",
+    }
+
+    def __init__(self, fallback: MarketDataProvider | None = None) -> None:
+        self.fallback = fallback or SampleMarketDataProvider()
+
+    def latest_price(self, symbol: str) -> float:
+        try:
+            bars = self.bars(symbol=symbol, period="daily")
+            return bars[-1].close
+        except Exception:
+            return self.fallback.latest_price(symbol)
+
+    def name(self, symbol: str) -> str:
+        return self.fallback.name(symbol)
+
+    def bars(self, symbol: str, period: str = "daily", adjust: str = "qfq") -> list[PriceBar]:
+        try:
+            import akshare as ak
+        except Exception:
+            return self.fallback.bars(symbol=symbol, period=period, adjust=adjust)
+
+        ak_period = self.period_map.get(period, "daily")
+        try:
+            frame = ak.stock_zh_a_hist(symbol=symbol, period=ak_period, adjust=adjust)
+        except Exception:
+            return self.fallback.bars(symbol=symbol, period=period, adjust=adjust)
+
+        if frame.empty:
+            return self.fallback.bars(symbol=symbol, period=period, adjust=adjust)
+
+        frame = frame.tail(180)
+        bars: list[PriceBar] = []
+        now = datetime.now()
+        for row in frame.to_dict("records"):
+            bars.append(
+                PriceBar(
+                    symbol=symbol,
+                    period=period,
+                    trade_date=row["日期"],
+                    open=float(row["开盘"]),
+                    high=float(row["最高"]),
+                    low=float(row["最低"]),
+                    close=float(row["收盘"]),
+                    volume=float(row.get("成交量", 0)),
+                    amount=float(row.get("成交额", 0)),
+                    turnover_rate=float(row["换手率"]) if row.get("换手率") not in (None, "") else None,
+                    adjust=adjust,
+                    updated_at=now,
+                )
+            )
+        return bars
+
+
+sample_market_data = SampleMarketDataProvider()
+akshare_market_data = AkShareMarketDataProvider(fallback=sample_market_data)
+market_data: MarketDataProvider = (
+    akshare_market_data if os.getenv("MARKET_DATA_PROVIDER") == "akshare" else sample_market_data
+)

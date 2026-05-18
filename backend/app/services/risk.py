@@ -1,7 +1,7 @@
 from datetime import datetime
 
 from app.schemas import RiskAdvice
-from app.services.market_data import sample_market_data
+from app.services.market_data import market_data
 from app.services.portfolio import portfolio_service
 
 
@@ -23,7 +23,7 @@ class RiskService:
         summary = portfolio_service.summary()
         positions = {position.symbol: position for position in portfolio_service.positions()}
         position = positions.get(symbol)
-        current_price = sample_market_data.latest_price(symbol)
+        current_price = market_data.latest_price(symbol)
         stop_loss_price = round(current_price * 0.948, 2)
         fixed_amount = fixed_risk_position_amount(summary.total_assets, current_price, stop_loss_price, 0.012)
         kelly_ratio = fractional_kelly(win_rate=0.52, win_loss_ratio=1.45, fraction=0.25)
@@ -43,7 +43,7 @@ class RiskService:
 
         return RiskAdvice(
             symbol=symbol,
-            name=sample_market_data.name(symbol),
+            name=market_data.name(symbol),
             current_price=round(current_price, 2),
             position_ratio=round(position_ratio, 4),
             suggested_min_ratio=0.25,

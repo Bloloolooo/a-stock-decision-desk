@@ -10,6 +10,14 @@ export type Position = {
   updated_at: string;
 };
 
+export type PositionInput = {
+  symbol: string;
+  name: string;
+  quantity: number;
+  average_cost: number;
+  note?: string;
+};
+
 export type PortfolioSummary = {
   total_assets: number;
   cash: number;

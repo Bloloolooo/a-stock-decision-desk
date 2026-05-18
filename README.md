@@ -20,6 +20,15 @@ pip install -r requirements.txt
 uvicorn app.main:app --reload --port 8000
 ```
 
+默认数据库为 `backend/stock_tool.sqlite3`。这个文件只保存在本机，不提交到仓库。
+
+默认行情源使用离线示例数据，便于没有网络时开发和试用。要尝试 AkShare：
+
+```bash
+cd backend
+MARKET_DATA_PROVIDER=akshare .venv/bin/uvicorn app.main:app --reload --port 8000
+```
+
 前端：
 
 ```bash
