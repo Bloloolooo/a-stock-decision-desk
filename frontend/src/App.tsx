@@ -49,9 +49,14 @@ export default function App() {
 
   const reloadMarket = () => {
     setStatus("刷新行情中");
-    return Promise.all([api.bars(selectedSymbol, period), api.risk(selectedSymbol), api.marketStatus()])
-      .then(([barData, riskData, marketStatusData]) => {
+    return api.bars(selectedSymbol, period)
+      .then((barData) => {
         setBars(barData);
+        return Promise.all([api.risk(selectedSymbol), api.marketStatus()]);
+      })
+      .then((result) => {
+        const riskData = result[0] as RiskAdvice;
+        const marketStatusData = result[1] as MarketStatus;
         setRisk(riskData);
         setMarketStatus(marketStatusData);
         setStatus(`${marketStatusData.description}已更新`);

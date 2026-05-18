@@ -52,7 +52,7 @@ class RiskService:
             stop_loss_price=stop_loss_price,
             single_stock_risk=round(single_stock_risk, 2),
             message=message,
-            signal_sources=["趋势强度：示例数据偏强", "量能：近期放大", "凯利：使用 0.25 分数凯利"],
+            signal_sources=["趋势强度：基于当前行情源", "量能：近期放大", "凯利：使用 0.25 分数凯利"],
             kelly_enabled=True,
             updated_at=datetime.now(),
         )

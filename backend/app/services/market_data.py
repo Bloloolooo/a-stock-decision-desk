@@ -1,7 +1,12 @@
 from datetime import date, datetime, timedelta
+import json
 from math import sin
 import os
+import re
+import time
 from typing import Protocol
+from urllib.parse import quote
+from urllib.request import Request, urlopen
 
 from app.schemas import MarketStatus, PriceBar, StockInfo
 
@@ -85,7 +90,7 @@ class SampleMarketDataProvider:
 
 class AkShareMarketDataProvider:
     provider_name = "akshare"
-    description = "AkShare 免费公开数据，失败时回退到示例数据"
+    description = "AkShare/Sina 免费公开数据，失败时回退到示例数据"
 
     period_map = {
         "daily": "daily",
@@ -103,12 +108,11 @@ class AkShareMarketDataProvider:
         self.last_error: str | None = None
 
     def latest_price(self, symbol: str) -> float:
-        try:
-            bars = self.bars(symbol=symbol, period="daily")
-            return bars[-1].close
-        except Exception:
-            self.last_source = "sample"
-            return self.fallback.latest_price(symbol)
+        cached = self._bars_cache.get((symbol, "daily", "qfq"))
+        if cached:
+            return cached[1][-1].close
+        bars = self.bars(symbol=symbol, period="daily")
+        return bars[-1].close
 
     def name(self, symbol: str) -> str:
         if symbol in self._name_cache:
@@ -130,7 +134,9 @@ class AkShareMarketDataProvider:
     def bars(self, symbol: str, period: str = "daily", adjust: str = "qfq") -> list[PriceBar]:
         cache_key = (symbol, period, adjust)
         cached = self._bars_cache.get(cache_key)
-        if cached and (datetime.now() - cached[0]).total_seconds() < 5:
+        if cached and (datetime.now() - cached[0]).total_seconds() < 60:
+            self.last_source = "akshare"
+            self.last_error = None
             return cached[1]
 
         try:
@@ -142,13 +148,28 @@ class AkShareMarketDataProvider:
 
         ak_period = self.period_map.get(period, "daily")
         try:
-            frame = ak.stock_zh_a_hist(symbol=symbol, period=ak_period, adjust=adjust)
+            frame = self._fetch_hist(ak, symbol=symbol, period=ak_period, adjust=adjust)
         except Exception as exc:
+            try:
+                bars = self._fetch_sina_bars(symbol=symbol, period=period, adjust=adjust)
+                self.last_source = "sina"
+                self.last_error = f"AkShare 失败，已使用 Sina 真实行情：{exc}"
+                self._bars_cache[cache_key] = (datetime.now(), bars)
+                return bars
+            except Exception as sina_exc:
+                self.last_error = f"AkShare 失败：{exc}; Sina 失败：{sina_exc}"
+            if cached:
+                self.last_source = "akshare"
+                self.last_error = f"真实源本次刷新失败，使用最近真实缓存：{self.last_error}"
+                return cached[1]
             self.last_source = "sample"
-            self.last_error = str(exc)
             return self.fallback.bars(symbol=symbol, period=period, adjust=adjust)
 
         if frame.empty:
+            if cached:
+                self.last_source = "akshare"
+                self.last_error = "AkShare 返回空行情，使用最近真实缓存"
+                return cached[1]
             self.last_source = "sample"
             self.last_error = "AkShare 返回空行情"
             return self.fallback.bars(symbol=symbol, period=period, adjust=adjust)
@@ -178,6 +199,69 @@ class AkShareMarketDataProvider:
         self._bars_cache[cache_key] = (datetime.now(), bars)
         return bars
 
+    def _fetch_hist(self, ak, symbol: str, period: str, adjust: str):
+        last_error: Exception | None = None
+        for attempt in range(2):
+            try:
+                return ak.stock_zh_a_hist(symbol=symbol, period=period, adjust=adjust)
+            except Exception as exc:
+                last_error = exc
+                if attempt == 0:
+                    time.sleep(0.8)
+        raise last_error if last_error else RuntimeError("AkShare 请求失败")
+
+    def _fetch_sina_bars(self, symbol: str, period: str, adjust: str) -> list[PriceBar]:
+        if period not in {"daily", "5d", "intraday"}:
+            raise RuntimeError(f"Sina K 线暂不支持周期 {period}")
+        market_symbol = self._sina_symbol(symbol)
+        callback = f"var _{symbol}_"
+        url = (
+            "https://quotes.sina.cn/cn/api/jsonp.php/"
+            f"{quote(callback)}/CN_MarketDataService.getKLineData"
+            f"?symbol={market_symbol}&scale=240&ma=no&datalen=180"
+        )
+        request = Request(
+            url,
+            headers={
+                "User-Agent": "Mozilla/5.0",
+                "Referer": "https://finance.sina.com.cn",
+            },
+        )
+        with urlopen(request, timeout=10) as response:
+            payload = response.read().decode("utf-8", errors="ignore")
+        match = re.search(r"\((\[.*\])\)", payload, re.S)
+        if not match:
+            raise RuntimeError("Sina 返回格式无法解析")
+        rows = json.loads(match.group(1))
+        if not rows:
+            raise RuntimeError("Sina 返回空行情")
+
+        bars: list[PriceBar] = []
+        now = datetime.now()
+        for row in rows:
+            close = float(row["close"])
+            volume = float(row.get("volume", 0))
+            bars.append(
+                PriceBar(
+                    symbol=symbol,
+                    period=period,
+                    trade_date=row["day"],
+                    open=float(row["open"]),
+                    high=float(row["high"]),
+                    low=float(row["low"]),
+                    close=close,
+                    volume=volume,
+                    amount=round(volume * close, 2),
+                    turnover_rate=None,
+                    adjust=adjust,
+                    updated_at=now,
+                )
+            )
+        return bars
+
+    def _sina_symbol(self, symbol: str) -> str:
+        return f"sh{symbol}" if symbol.startswith("6") else f"sz{symbol}"
+
 
 sample_market_data = SampleMarketDataProvider()
 akshare_market_data = AkShareMarketDataProvider(fallback=sample_market_data)
@@ -193,6 +277,8 @@ def stock_info(symbol: str) -> StockInfo:
 def market_status() -> MarketStatus:
     if market_data.last_source == "akshare":
         description = "AkShare 真实行情"
+    elif market_data.last_source == "sina":
+        description = "Sina 真实行情"
     elif market_data.provider_name == "akshare":
         description = "AkShare 失败，已回退示例数据"
     else:
