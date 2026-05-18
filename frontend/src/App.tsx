@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { createChart, ColorType, type IChartApi, type UTCTimestamp } from "lightweight-charts";
 
 import { api } from "./api";
-import type { PortfolioSummary, Position, PriceBar, RiskAdvice, ScreenerResult } from "./types";
+import type { MarketStatus, PortfolioSummary, Position, PriceBar, RiskAdvice, ScreenerResult } from "./types";
 
 const emptySummary: PortfolioSummary = {
   total_assets: 0,
@@ -35,6 +35,7 @@ export default function App() {
   const [risk, setRisk] = useState<RiskAdvice | null>(null);
   const [trend, setTrend] = useState<ScreenerResult[]>([]);
   const [rebound, setRebound] = useState<ScreenerResult[]>([]);
+  const [marketStatus, setMarketStatus] = useState<MarketStatus | null>(null);
   const [status, setStatus] = useState("加载中");
 
   const reloadPortfolio = () => {
@@ -45,26 +46,33 @@ export default function App() {
       });
   };
 
+  const reloadMarket = () => {
+    setStatus("刷新行情中");
+    return Promise.all([api.bars(selectedSymbol, period), api.risk(selectedSymbol), api.marketStatus()])
+      .then(([barData, riskData, marketStatusData]) => {
+        setBars(barData);
+        setRisk(riskData);
+        setMarketStatus(marketStatusData);
+        setStatus(`${marketStatusData.description}已更新`);
+      })
+      .catch(() => setStatus("行情刷新失败"));
+  };
+
   useEffect(() => {
-    Promise.all([api.summary(), api.positions(), api.screener("trend"), api.screener("rebound")])
-      .then(([summaryData, positionData, trendData, reboundData]) => {
+    Promise.all([api.summary(), api.positions(), api.screener("trend"), api.screener("rebound"), api.marketStatus()])
+      .then(([summaryData, positionData, trendData, reboundData, marketStatusData]) => {
         setSummary(summaryData);
         setPositions(positionData);
         setTrend(trendData);
         setRebound(reboundData);
-        setStatus("示例数据已更新");
+        setMarketStatus(marketStatusData);
+        setStatus(`${marketStatusData.description}已更新`);
       })
       .catch(() => setStatus("后端未连接，等待数据"));
   }, []);
 
   useEffect(() => {
-    Promise.all([api.bars(selectedSymbol, period), api.risk(selectedSymbol)])
-      .then(([barData, riskData]) => {
-        setBars(barData);
-        setRisk(riskData);
-        setStatus("示例数据已更新");
-      })
-      .catch(() => setStatus("后端未连接，等待数据"));
+    reloadMarket();
   }, [selectedSymbol, period]);
 
   return (
@@ -94,6 +102,8 @@ export default function App() {
           onSelectSymbol={setSelectedSymbol}
           onPeriodChange={setPeriod}
           onPortfolioChange={reloadPortfolio}
+          onRefreshMarket={reloadMarket}
+          marketStatus={marketStatus}
         />
       )}
       {tab === "screener" && (
@@ -122,12 +132,13 @@ function HomePage(props: {
   onSelectSymbol: (symbol: string) => void;
   onPeriodChange: (period: string) => void;
   onPortfolioChange: () => Promise<void>;
+  onRefreshMarket: () => Promise<void>;
+  marketStatus: MarketStatus | null;
 }) {
   const selectedPosition = props.positions.find((position) => position.symbol === props.selectedSymbol);
   const [cashValue, setCashValue] = useState(String(Math.round(props.summary.cash)));
   const [positionForm, setPositionForm] = useState({
     symbol: "",
-    name: "",
     quantity: "",
     average_cost: "",
   });
@@ -146,13 +157,12 @@ function HomePage(props: {
   const savePosition = async () => {
     await api.upsertPosition({
       symbol: positionForm.symbol.trim(),
-      name: positionForm.name.trim(),
       quantity: Number(positionForm.quantity),
       average_cost: Number(positionForm.average_cost),
     });
     await props.onPortfolioChange();
     props.onSelectSymbol(positionForm.symbol.trim());
-    setPositionForm({ symbol: "", name: "", quantity: "", average_cost: "" });
+    setPositionForm({ symbol: "", quantity: "", average_cost: "" });
     setFormStatus("持仓已保存");
   };
 
@@ -202,10 +212,6 @@ function HomePage(props: {
               <input value={positionForm.symbol} onChange={(event) => setPositionForm({ ...positionForm, symbol: event.target.value })} placeholder="300308" />
             </label>
             <label>
-              名称
-              <input value={positionForm.name} onChange={(event) => setPositionForm({ ...positionForm, name: event.target.value })} placeholder="中际旭创" />
-            </label>
-            <label>
               数量
               <input value={positionForm.quantity} onChange={(event) => setPositionForm({ ...positionForm, quantity: event.target.value })} inputMode="numeric" />
             </label>
@@ -213,9 +219,10 @@ function HomePage(props: {
               买入均价
               <input value={positionForm.average_cost} onChange={(event) => setPositionForm({ ...positionForm, average_cost: event.target.value })} inputMode="decimal" />
             </label>
-            <button onClick={savePosition} disabled={!positionForm.symbol || !positionForm.name || !positionForm.quantity || !positionForm.average_cost}>
+            <button onClick={savePosition} disabled={!positionForm.symbol || !positionForm.quantity || !positionForm.average_cost}>
               保存持仓
             </button>
+            <span className="entry-hint">名称会根据代码自动匹配。</span>
             {formStatus && <p>{formStatus}</p>}
           </div>
         </aside>
@@ -224,14 +231,17 @@ function HomePage(props: {
           <div className="chart-header">
             <div>
               <h2>{props.risk?.name ?? selectedPosition?.name ?? props.selectedSymbol} <span>{props.selectedSymbol}</span></h2>
-              <p>现价 {props.risk?.current_price.toFixed(2) ?? "--"} · 成本 {selectedPosition?.average_cost.toFixed(2) ?? "--"} · 数据用于界面验证</p>
+              <p>现价 {props.risk?.current_price.toFixed(2) ?? "--"} · 成本 {selectedPosition?.average_cost.toFixed(2) ?? "--"} · 数据源 {props.marketStatus?.description ?? "--"}</p>
             </div>
-            <div className="periods">
-              {["intraday", "5d", "daily", "weekly", "monthly"].map((item) => (
-                <button key={item} className={props.period === item ? "active" : ""} onClick={() => props.onPeriodChange(item)}>
-                  {periodLabel(item)}
-                </button>
-              ))}
+            <div className="chart-actions">
+              <div className="periods">
+                {["intraday", "5d", "daily", "weekly", "monthly"].map((item) => (
+                  <button key={item} className={props.period === item ? "active" : ""} onClick={() => props.onPeriodChange(item)}>
+                    {periodLabel(item)}
+                  </button>
+                ))}
+              </div>
+              <button className="refresh-button" onClick={props.onRefreshMarket}>刷新行情</button>
             </div>
           </div>
           <KLineChart bars={props.bars} />

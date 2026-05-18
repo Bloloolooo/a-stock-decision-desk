@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 
 class PositionCreate(BaseModel):
     symbol: str
-    name: str
+    name: str = ""
     quantity: int = Field(ge=0)
     average_cost: float = Field(gt=0)
     note: str = ""
@@ -45,6 +45,17 @@ class PriceBar(BaseModel):
     amount: float
     turnover_rate: float | None = None
     adjust: str = "qfq"
+    updated_at: datetime
+
+
+class StockInfo(BaseModel):
+    symbol: str
+    name: str
+
+
+class MarketStatus(BaseModel):
+    provider: str
+    description: str
     updated_at: datetime
 
 

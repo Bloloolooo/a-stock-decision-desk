@@ -3,10 +3,13 @@ from math import sin
 import os
 from typing import Protocol
 
-from app.schemas import PriceBar
+from app.schemas import MarketStatus, PriceBar, StockInfo
 
 
 class MarketDataProvider(Protocol):
+    provider_name: str
+    description: str
+
     def latest_price(self, symbol: str) -> float:
         ...
 
@@ -18,6 +21,9 @@ class MarketDataProvider(Protocol):
 
 
 class SampleMarketDataProvider:
+    provider_name = "sample"
+    description = "示例数据"
+
     names = {
         "300308": "中际旭创",
         "300750": "宁德时代",
@@ -74,6 +80,9 @@ class SampleMarketDataProvider:
 
 
 class AkShareMarketDataProvider:
+    provider_name = "akshare"
+    description = "AkShare 免费公开数据，失败时回退到示例数据"
+
     period_map = {
         "daily": "daily",
         "weekly": "weekly",
@@ -84,6 +93,7 @@ class AkShareMarketDataProvider:
 
     def __init__(self, fallback: MarketDataProvider | None = None) -> None:
         self.fallback = fallback or SampleMarketDataProvider()
+        self._name_cache: dict[str, str] = {}
 
     def latest_price(self, symbol: str) -> float:
         try:
@@ -93,7 +103,20 @@ class AkShareMarketDataProvider:
             return self.fallback.latest_price(symbol)
 
     def name(self, symbol: str) -> str:
-        return self.fallback.name(symbol)
+        if symbol in self._name_cache:
+            return self._name_cache[symbol]
+        try:
+            import akshare as ak
+
+            frame = ak.stock_info_a_code_name()
+            for row in frame.to_dict("records"):
+                code = str(row.get("code") or row.get("代码") or "")
+                name = str(row.get("name") or row.get("名称") or "")
+                if code and name:
+                    self._name_cache[code] = name
+        except Exception:
+            return self.fallback.name(symbol)
+        return self._name_cache.get(symbol, self.fallback.name(symbol))
 
     def bars(self, symbol: str, period: str = "daily", adjust: str = "qfq") -> list[PriceBar]:
         try:
@@ -138,3 +161,15 @@ akshare_market_data = AkShareMarketDataProvider(fallback=sample_market_data)
 market_data: MarketDataProvider = (
     akshare_market_data if os.getenv("MARKET_DATA_PROVIDER") == "akshare" else sample_market_data
 )
+
+
+def stock_info(symbol: str) -> StockInfo:
+    return StockInfo(symbol=symbol, name=market_data.name(symbol))
+
+
+def market_status() -> MarketStatus:
+    return MarketStatus(
+        provider=market_data.provider_name,
+        description=market_data.description,
+        updated_at=datetime.now(),
+    )

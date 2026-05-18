@@ -17,3 +17,13 @@ def test_portfolio_persists_cash_and_position(monkeypatch, tmp_path) -> None:
     assert summary.cash == 12345
     assert positions["600519"].quantity == 10
     assert positions["600519"].average_cost == 1500
+
+
+def test_portfolio_resolves_missing_name(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("STOCK_TOOL_DB_PATH", str(tmp_path / "test.sqlite3"))
+    service = PortfolioService()
+    position = service.upsert_position(
+        PositionCreate(symbol="300308", quantity=100, average_cost=150)
+    )
+
+    assert position.name == "中际旭创"

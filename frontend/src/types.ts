@@ -12,7 +12,7 @@ export type Position = {
 
 export type PositionInput = {
   symbol: string;
-  name: string;
+  name?: string;
   quantity: number;
   average_cost: number;
   note?: string;
@@ -37,6 +37,12 @@ export type PriceBar = {
   close: number;
   volume: number;
   amount: number;
+};
+
+export type MarketStatus = {
+  provider: string;
+  description: string;
+  updated_at: string;
 };
 
 export type RiskAdvice = {

@@ -22,6 +22,13 @@ class PortfolioService:
             )
 
     def upsert_position(self, payload: PositionCreate) -> Position:
+        normalized_payload = PositionCreate(
+            **{
+                **payload.model_dump(),
+                "symbol": payload.symbol.strip(),
+                "name": payload.name.strip() or market_data.name(payload.symbol.strip()),
+            }
+        )
         with get_connection() as connection:
             connection.execute(
                 """
@@ -34,9 +41,15 @@ class PortfolioService:
                     note = excluded.note,
                     updated_at = excluded.updated_at
                 """,
-                (payload.symbol, payload.name, payload.quantity, payload.average_cost, payload.note),
+                (
+                    normalized_payload.symbol,
+                    normalized_payload.name,
+                    normalized_payload.quantity,
+                    normalized_payload.average_cost,
+                    normalized_payload.note,
+                ),
             )
-        return self._position_view(payload)
+        return self._position_view(normalized_payload)
 
     def positions(self) -> list[Position]:
         with get_connection() as connection:

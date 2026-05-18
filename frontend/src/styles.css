@@ -57,6 +57,7 @@ button {
 
 .tabs button,
 .periods button,
+.refresh-button,
 .panel-title button,
 .link-button,
 .watchlist button {
@@ -254,6 +255,12 @@ td small {
   font-size: 12px;
 }
 
+.entry-hint {
+  color: #68758a;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .chart-panel {
   padding: 0;
   overflow: hidden;
@@ -291,6 +298,12 @@ td small {
   gap: 5px;
 }
 
+.chart-actions {
+  display: grid;
+  justify-items: end;
+  gap: 8px;
+}
+
 .periods button {
   min-width: 44px;
   padding: 6px 8px;
@@ -299,6 +312,17 @@ td small {
   background: #fff;
   color: #405064;
   font-size: 12px;
+}
+
+.refresh-button {
+  border: 1px solid #1f4f8f;
+  border-radius: 5px;
+  padding: 6px 10px;
+  background: #eef4fb;
+  color: #1f4f8f;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
 }
 
 .chart-canvas {
