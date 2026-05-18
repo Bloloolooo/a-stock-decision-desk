@@ -41,7 +41,9 @@ export type PriceBar = {
 
 export type MarketStatus = {
   provider: string;
+  active_source: string;
   description: string;
+  last_error?: string | null;
   updated_at: string;
 };
 

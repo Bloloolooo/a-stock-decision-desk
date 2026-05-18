@@ -55,7 +55,9 @@ class StockInfo(BaseModel):
 
 class MarketStatus(BaseModel):
     provider: str
+    active_source: str
     description: str
+    last_error: str | None = None
     updated_at: datetime
 
 

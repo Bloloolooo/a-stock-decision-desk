@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createChart, ColorType, type IChartApi, type UTCTimestamp } from "lightweight-charts";
 
 import { api } from "./api";
@@ -36,6 +36,7 @@ export default function App() {
   const [trend, setTrend] = useState<ScreenerResult[]>([]);
   const [rebound, setRebound] = useState<ScreenerResult[]>([]);
   const [marketStatus, setMarketStatus] = useState<MarketStatus | null>(null);
+  const [autoRefreshSeconds, setAutoRefreshSeconds] = useState(10);
   const [status, setStatus] = useState("加载中");
 
   const reloadPortfolio = () => {
@@ -75,6 +76,14 @@ export default function App() {
     reloadMarket();
   }, [selectedSymbol, period]);
 
+  useEffect(() => {
+    if (autoRefreshSeconds <= 0) return;
+    const timer = window.setInterval(() => {
+      reloadMarket();
+    }, autoRefreshSeconds * 1000);
+    return () => window.clearInterval(timer);
+  }, [autoRefreshSeconds, selectedSymbol, period]);
+
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -104,6 +113,8 @@ export default function App() {
           onPortfolioChange={reloadPortfolio}
           onRefreshMarket={reloadMarket}
           marketStatus={marketStatus}
+          autoRefreshSeconds={autoRefreshSeconds}
+          onAutoRefreshSecondsChange={setAutoRefreshSeconds}
         />
       )}
       {tab === "screener" && (
@@ -134,8 +145,11 @@ function HomePage(props: {
   onPortfolioChange: () => Promise<void>;
   onRefreshMarket: () => Promise<void>;
   marketStatus: MarketStatus | null;
+  autoRefreshSeconds: number;
+  onAutoRefreshSecondsChange: (seconds: number) => void;
 }) {
   const selectedPosition = props.positions.find((position) => position.symbol === props.selectedSymbol);
+  const symbolInputRef = useRef<HTMLInputElement>(null);
   const [cashValue, setCashValue] = useState(String(Math.round(props.summary.cash)));
   const [positionForm, setPositionForm] = useState({
     symbol: "",
@@ -180,7 +194,7 @@ function HomePage(props: {
         <aside className="panel watchlist">
           <div className="panel-title">
             <h2>持仓 / 自选</h2>
-            <button>+ 添加</button>
+            <button onClick={() => symbolInputRef.current?.focus()}>+ 添加</button>
           </div>
           <div className="stock-list">
             {props.positions.map((position) => (
@@ -209,7 +223,7 @@ function HomePage(props: {
             <h3>持仓录入</h3>
             <label>
               代码
-              <input value={positionForm.symbol} onChange={(event) => setPositionForm({ ...positionForm, symbol: event.target.value })} placeholder="300308" />
+              <input ref={symbolInputRef} value={positionForm.symbol} onChange={(event) => setPositionForm({ ...positionForm, symbol: event.target.value })} placeholder="300308" />
             </label>
             <label>
               数量
@@ -241,7 +255,16 @@ function HomePage(props: {
                   </button>
                 ))}
               </div>
-              <button className="refresh-button" onClick={props.onRefreshMarket}>刷新行情</button>
+              <div className="refresh-controls">
+                <select value={props.autoRefreshSeconds} onChange={(event) => props.onAutoRefreshSecondsChange(Number(event.target.value))}>
+                  <option value={5}>5 秒</option>
+                  <option value={10}>10 秒</option>
+                  <option value={30}>30 秒</option>
+                  <option value={60}>60 秒</option>
+                  <option value={0}>暂停</option>
+                </select>
+                <button className="refresh-button" onClick={props.onRefreshMarket}>刷新行情</button>
+              </div>
             </div>
           </div>
           <KLineChart bars={props.bars} />

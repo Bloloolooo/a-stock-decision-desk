@@ -58,6 +58,7 @@ button {
 .tabs button,
 .periods button,
 .refresh-button,
+.refresh-controls select,
 .panel-title button,
 .link-button,
 .watchlist button {
@@ -302,6 +303,22 @@ td small {
   display: grid;
   justify-items: end;
   gap: 8px;
+}
+
+.refresh-controls {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.refresh-controls select {
+  border: 1px solid #cbd7e6;
+  border-radius: 5px;
+  padding: 6px 8px;
+  background: #fff;
+  color: #405064;
+  font-size: 12px;
+  cursor: pointer;
 }
 
 .periods button {

@@ -22,11 +22,11 @@ uvicorn app.main:app --reload --port 8000
 
 默认数据库为 `backend/stock_tool.sqlite3`。这个文件只保存在本机，不提交到仓库。
 
-默认行情源使用离线示例数据，便于没有网络时开发和试用。要尝试 AkShare：
+默认行情源优先使用 AkShare 真实行情，失败时回退到示例数据。要强制使用离线示例数据：
 
 ```bash
 cd backend
-MARKET_DATA_PROVIDER=akshare .venv/bin/uvicorn app.main:app --reload --port 8000
+MARKET_DATA_PROVIDER=sample .venv/bin/uvicorn app.main:app --reload --port 8000
 ```
 
 前端：

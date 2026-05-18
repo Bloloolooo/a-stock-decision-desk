@@ -9,6 +9,8 @@ from app.schemas import MarketStatus, PriceBar, StockInfo
 class MarketDataProvider(Protocol):
     provider_name: str
     description: str
+    last_source: str
+    last_error: str | None
 
     def latest_price(self, symbol: str) -> float:
         ...
@@ -23,6 +25,8 @@ class MarketDataProvider(Protocol):
 class SampleMarketDataProvider:
     provider_name = "sample"
     description = "示例数据"
+    last_source = "sample"
+    last_error: str | None = None
 
     names = {
         "300308": "中际旭创",
@@ -94,12 +98,16 @@ class AkShareMarketDataProvider:
     def __init__(self, fallback: MarketDataProvider | None = None) -> None:
         self.fallback = fallback or SampleMarketDataProvider()
         self._name_cache: dict[str, str] = {}
+        self._bars_cache: dict[tuple[str, str, str], tuple[datetime, list[PriceBar]]] = {}
+        self.last_source = "akshare"
+        self.last_error: str | None = None
 
     def latest_price(self, symbol: str) -> float:
         try:
             bars = self.bars(symbol=symbol, period="daily")
             return bars[-1].close
         except Exception:
+            self.last_source = "sample"
             return self.fallback.latest_price(symbol)
 
     def name(self, symbol: str) -> str:
@@ -115,22 +123,34 @@ class AkShareMarketDataProvider:
                 if code and name:
                     self._name_cache[code] = name
         except Exception:
+            self.last_source = "sample"
             return self.fallback.name(symbol)
         return self._name_cache.get(symbol, self.fallback.name(symbol))
 
     def bars(self, symbol: str, period: str = "daily", adjust: str = "qfq") -> list[PriceBar]:
+        cache_key = (symbol, period, adjust)
+        cached = self._bars_cache.get(cache_key)
+        if cached and (datetime.now() - cached[0]).total_seconds() < 5:
+            return cached[1]
+
         try:
             import akshare as ak
         except Exception:
+            self.last_source = "sample"
+            self.last_error = "AkShare 未安装或无法导入"
             return self.fallback.bars(symbol=symbol, period=period, adjust=adjust)
 
         ak_period = self.period_map.get(period, "daily")
         try:
             frame = ak.stock_zh_a_hist(symbol=symbol, period=ak_period, adjust=adjust)
-        except Exception:
+        except Exception as exc:
+            self.last_source = "sample"
+            self.last_error = str(exc)
             return self.fallback.bars(symbol=symbol, period=period, adjust=adjust)
 
         if frame.empty:
+            self.last_source = "sample"
+            self.last_error = "AkShare 返回空行情"
             return self.fallback.bars(symbol=symbol, period=period, adjust=adjust)
 
         frame = frame.tail(180)
@@ -153,13 +173,16 @@ class AkShareMarketDataProvider:
                     updated_at=now,
                 )
             )
+        self.last_source = "akshare"
+        self.last_error = None
+        self._bars_cache[cache_key] = (datetime.now(), bars)
         return bars
 
 
 sample_market_data = SampleMarketDataProvider()
 akshare_market_data = AkShareMarketDataProvider(fallback=sample_market_data)
 market_data: MarketDataProvider = (
-    akshare_market_data if os.getenv("MARKET_DATA_PROVIDER") == "akshare" else sample_market_data
+    sample_market_data if os.getenv("MARKET_DATA_PROVIDER") == "sample" else akshare_market_data
 )
 
 
@@ -168,8 +191,16 @@ def stock_info(symbol: str) -> StockInfo:
 
 
 def market_status() -> MarketStatus:
+    if market_data.last_source == "akshare":
+        description = "AkShare 真实行情"
+    elif market_data.provider_name == "akshare":
+        description = "AkShare 失败，已回退示例数据"
+    else:
+        description = market_data.description
     return MarketStatus(
         provider=market_data.provider_name,
-        description=market_data.description,
+        active_source=market_data.last_source,
+        description=description,
+        last_error=market_data.last_error,
         updated_at=datetime.now(),
     )
