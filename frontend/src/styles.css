@@ -322,13 +322,30 @@ td small {
 }
 
 .periods button {
-  min-width: 44px;
+  min-width: 62px;
   padding: 6px 8px;
   border: 1px solid #cbd7e6;
   border-radius: 5px;
   background: #fff;
   color: #405064;
   font-size: 12px;
+}
+
+.periods button span,
+.periods button small {
+  display: block;
+  line-height: 1.2;
+}
+
+.periods button small {
+  margin-top: 2px;
+  font-size: 10px;
+  opacity: 0.72;
+}
+
+.periods button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
 }
 
 .refresh-button {

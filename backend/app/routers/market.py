@@ -1,7 +1,7 @@
 from fastapi import APIRouter
 
-from app.schemas import MarketStatus, PriceBar, StockInfo
-from app.services.market_data import market_data, market_status, stock_info
+from app.schemas import MarketPeriod, MarketStatus, PriceBar, StockInfo
+from app.services.market_data import market_data, market_periods, market_status, stock_info
 
 router = APIRouter()
 
@@ -9,6 +9,11 @@ router = APIRouter()
 @router.get("/status", response_model=MarketStatus)
 def get_market_status() -> MarketStatus:
     return market_status()
+
+
+@router.get("/periods", response_model=list[MarketPeriod])
+def get_market_periods() -> list[MarketPeriod]:
+    return market_periods()
 
 
 @router.get("/stocks/{symbol}", response_model=StockInfo)

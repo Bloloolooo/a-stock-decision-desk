@@ -1,4 +1,4 @@
-import type { MarketStatus, PortfolioSummary, Position, PositionInput, PriceBar, RiskAdvice, ScreenerResult } from "./types";
+import type { MarketPeriod, MarketStatus, PortfolioSummary, Position, PositionInput, PriceBar, RiskAdvice, ScreenerResult, SellInput } from "./types";
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? "http://localhost:8000/api";
 
@@ -27,7 +27,9 @@ export const api = {
   positions: () => getJson<Position[]>("/portfolio/positions"),
   updateCash: (cash: number) => postJson<PortfolioSummary>("/portfolio/cash", { cash }),
   upsertPosition: (position: PositionInput) => postJson<Position>("/portfolio/positions", position),
+  sellPosition: (position: SellInput) => postJson<PortfolioSummary>("/portfolio/sell", position),
   marketStatus: () => getJson<MarketStatus>("/market/status"),
+  marketPeriods: () => getJson<MarketPeriod[]>("/market/periods"),
   bars: (symbol: string, period: string) => getJson<PriceBar[]>(`/market/bars/${symbol}?period=${period}`),
   risk: (symbol: string) => getJson<RiskAdvice>(`/risk/advice/${symbol}`),
   screener: (type: "trend" | "rebound") => getJson<ScreenerResult[]>(`/screener/results?type=${type}`),

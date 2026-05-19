@@ -12,6 +12,13 @@ class PositionCreate(BaseModel):
     note: str = ""
 
 
+class PositionSell(BaseModel):
+    symbol: str
+    quantity: int = Field(gt=0)
+    sell_price: float = Field(gt=0)
+    note: str = ""
+
+
 class Position(PositionCreate):
     last_price: float
     market_value: float
@@ -37,6 +44,7 @@ class PriceBar(BaseModel):
     symbol: str
     period: str
     trade_date: date
+    timestamp: str
     open: float
     high: float
     low: float
@@ -59,6 +67,13 @@ class MarketStatus(BaseModel):
     description: str
     last_error: str | None = None
     updated_at: datetime
+
+
+class MarketPeriod(BaseModel):
+    key: str
+    label: str
+    description: str
+    available: bool = True
 
 
 class RiskAdvice(BaseModel):

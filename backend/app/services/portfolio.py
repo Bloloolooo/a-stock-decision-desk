@@ -2,7 +2,7 @@ from datetime import datetime
 from sqlite3 import Row
 
 from app.db import get_connection, init_db
-from app.schemas import PortfolioSummary, Position, PositionCreate
+from app.schemas import PortfolioSummary, Position, PositionCreate, PositionSell
 from app.services.market_data import market_data
 
 
@@ -49,7 +49,59 @@ class PortfolioService:
                     normalized_payload.note,
                 ),
             )
+            connection.execute(
+                """
+                INSERT INTO trade_records (symbol, name, side, quantity, price, amount, note, created_at)
+                VALUES (?, ?, 'buy', ?, ?, ?, ?, datetime('now'))
+                """,
+                (
+                    normalized_payload.symbol,
+                    normalized_payload.name,
+                    normalized_payload.quantity,
+                    normalized_payload.average_cost,
+                    normalized_payload.quantity * normalized_payload.average_cost,
+                    normalized_payload.note,
+                ),
+            )
         return self._position_view(normalized_payload)
+
+    def sell_position(self, payload: PositionSell) -> None:
+        symbol = payload.symbol.strip()
+        with get_connection() as connection:
+            row = connection.execute(
+                "SELECT symbol, name, quantity, average_cost, note FROM positions WHERE symbol = ?",
+                (symbol,),
+            ).fetchone()
+            if not row:
+                raise ValueError(f"{symbol} 没有持仓")
+            current_quantity = int(row["quantity"])
+            if payload.quantity > current_quantity:
+                raise ValueError(f"{symbol} 卖出数量不能超过当前持仓 {current_quantity}")
+
+            remaining_quantity = current_quantity - payload.quantity
+            if remaining_quantity == 0:
+                connection.execute("DELETE FROM positions WHERE symbol = ?", (symbol,))
+            else:
+                connection.execute(
+                    "UPDATE positions SET quantity = ?, updated_at = datetime('now') WHERE symbol = ?",
+                    (remaining_quantity, symbol),
+                )
+            amount = payload.quantity * payload.sell_price
+            connection.execute(
+                """
+                INSERT INTO account (id, cash, updated_at)
+                VALUES (1, ?, datetime('now'))
+                ON CONFLICT(id) DO UPDATE SET cash = cash + excluded.cash, updated_at = excluded.updated_at
+                """,
+                (amount,),
+            )
+            connection.execute(
+                """
+                INSERT INTO trade_records (symbol, name, side, quantity, price, amount, note, created_at)
+                VALUES (?, ?, 'sell', ?, ?, ?, ?, datetime('now'))
+                """,
+                (symbol, row["name"], payload.quantity, payload.sell_price, amount, payload.note),
+            )
 
     def positions(self) -> list[Position]:
         with get_connection() as connection:

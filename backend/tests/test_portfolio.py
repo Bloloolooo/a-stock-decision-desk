@@ -1,4 +1,4 @@
-from app.schemas import PositionCreate
+from app.schemas import PositionCreate, PositionSell
 from app.services.market_data import sample_market_data
 import app.services.portfolio as portfolio_module
 from app.services.portfolio import PortfolioService
@@ -31,3 +31,20 @@ def test_portfolio_resolves_missing_name(monkeypatch, tmp_path) -> None:
     )
 
     assert position.name == "中际旭创"
+
+
+def test_sell_position_reduces_quantity_and_adds_cash(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("STOCK_TOOL_DB_PATH", str(tmp_path / "test.sqlite3"))
+    monkeypatch.setattr(portfolio_module, "market_data", sample_market_data)
+    service = PortfolioService()
+    service.set_cash(1000)
+    service.upsert_position(
+        PositionCreate(symbol="300308", quantity=100, average_cost=150)
+    )
+
+    service.sell_position(PositionSell(symbol="300308", quantity=40, sell_price=180))
+    positions = {position.symbol: position for position in service.positions()}
+    summary = service.summary()
+
+    assert positions["300308"].quantity == 60
+    assert summary.cash == 8200

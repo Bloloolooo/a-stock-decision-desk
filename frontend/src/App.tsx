@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createChart, ColorType, type IChartApi, type UTCTimestamp } from "lightweight-charts";
 
 import { api } from "./api";
-import type { MarketStatus, PortfolioSummary, Position, PriceBar, RiskAdvice, ScreenerResult } from "./types";
+import type { MarketPeriod, MarketStatus, PortfolioSummary, Position, PriceBar, RiskAdvice, ScreenerResult } from "./types";
 
 const emptySummary: PortfolioSummary = {
   total_assets: 0,
@@ -12,6 +12,14 @@ const emptySummary: PortfolioSummary = {
   today_pnl: 0,
   updated_at: new Date().toISOString(),
 };
+
+const defaultPeriods: MarketPeriod[] = [
+  { key: "intraday", label: "分时", description: "1 分钟线", available: true },
+  { key: "5d", label: "5日", description: "近 5 日 1 分钟线", available: true },
+  { key: "daily", label: "日K", description: "日线", available: true },
+  { key: "weekly", label: "周K", description: "周线", available: true },
+  { key: "monthly", label: "月K", description: "月线", available: true },
+];
 
 function yuan(value: number) {
   return `¥${value.toLocaleString("zh-CN", { maximumFractionDigits: 0 })}`;
@@ -36,6 +44,7 @@ export default function App() {
   const [trend, setTrend] = useState<ScreenerResult[]>([]);
   const [rebound, setRebound] = useState<ScreenerResult[]>([]);
   const [marketStatus, setMarketStatus] = useState<MarketStatus | null>(null);
+  const [periods, setPeriods] = useState<MarketPeriod[]>(defaultPeriods);
   const [autoRefreshSeconds, setAutoRefreshSeconds] = useState(10);
   const [status, setStatus] = useState("加载中");
 
@@ -65,13 +74,14 @@ export default function App() {
   };
 
   useEffect(() => {
-    Promise.all([api.summary(), api.positions(), api.screener("trend"), api.screener("rebound"), api.marketStatus()])
-      .then(([summaryData, positionData, trendData, reboundData, marketStatusData]) => {
+    Promise.all([api.summary(), api.positions(), api.screener("trend"), api.screener("rebound"), api.marketStatus(), api.marketPeriods()])
+      .then(([summaryData, positionData, trendData, reboundData, marketStatusData, periodData]) => {
         setSummary(summaryData);
         setPositions(positionData);
         setTrend(trendData);
         setRebound(reboundData);
         setMarketStatus(marketStatusData);
+        setPeriods(periodData);
         setStatus(`${marketStatusData.description}已更新`);
       })
       .catch(() => setStatus("后端未连接，等待数据"));
@@ -118,6 +128,7 @@ export default function App() {
           onPortfolioChange={reloadPortfolio}
           onRefreshMarket={reloadMarket}
           marketStatus={marketStatus}
+          periods={periods}
           autoRefreshSeconds={autoRefreshSeconds}
           onAutoRefreshSecondsChange={setAutoRefreshSeconds}
         />
@@ -150,6 +161,7 @@ function HomePage(props: {
   onPortfolioChange: () => Promise<void>;
   onRefreshMarket: () => Promise<void>;
   marketStatus: MarketStatus | null;
+  periods: MarketPeriod[];
   autoRefreshSeconds: number;
   onAutoRefreshSecondsChange: (seconds: number) => void;
 }) {
@@ -161,11 +173,20 @@ function HomePage(props: {
     quantity: "",
     average_cost: "",
   });
+  const [sellForm, setSellForm] = useState({
+    symbol: props.selectedSymbol,
+    quantity: "",
+    sell_price: "",
+  });
   const [formStatus, setFormStatus] = useState("");
 
   useEffect(() => {
     setCashValue(String(Math.round(props.summary.cash)));
   }, [props.summary.cash]);
+
+  useEffect(() => {
+    setSellForm((current) => ({ ...current, symbol: props.selectedSymbol }));
+  }, [props.selectedSymbol]);
 
   const saveCash = async () => {
     await api.updateCash(Number(cashValue));
@@ -183,6 +204,17 @@ function HomePage(props: {
     props.onSelectSymbol(positionForm.symbol.trim());
     setPositionForm({ symbol: "", quantity: "", average_cost: "" });
     setFormStatus("持仓已保存");
+  };
+
+  const sellPosition = async () => {
+    await api.sellPosition({
+      symbol: sellForm.symbol.trim(),
+      quantity: Number(sellForm.quantity),
+      sell_price: Number(sellForm.sell_price),
+    });
+    await props.onPortfolioChange();
+    setSellForm({ symbol: props.selectedSymbol, quantity: "", sell_price: "" });
+    setFormStatus("卖出已记录");
   };
 
   return (
@@ -243,6 +275,22 @@ function HomePage(props: {
             </button>
             <span className="entry-hint">名称会根据代码自动匹配。</span>
             {formStatus && <p>{formStatus}</p>}
+            <h3>卖出记录</h3>
+            <label>
+              代码
+              <input value={sellForm.symbol} onChange={(event) => setSellForm({ ...sellForm, symbol: event.target.value })} placeholder="300308" />
+            </label>
+            <label>
+              卖出数量
+              <input value={sellForm.quantity} onChange={(event) => setSellForm({ ...sellForm, quantity: event.target.value })} inputMode="numeric" />
+            </label>
+            <label>
+              卖出价格
+              <input value={sellForm.sell_price} onChange={(event) => setSellForm({ ...sellForm, sell_price: event.target.value })} inputMode="decimal" />
+            </label>
+            <button onClick={sellPosition} disabled={!sellForm.symbol || !sellForm.quantity || !sellForm.sell_price}>
+              记录卖出
+            </button>
           </div>
         </aside>
 
@@ -254,9 +302,10 @@ function HomePage(props: {
             </div>
             <div className="chart-actions">
               <div className="periods">
-                {["intraday", "5d", "daily", "weekly", "monthly"].map((item) => (
-                  <button key={item} className={props.period === item ? "active" : ""} onClick={() => props.onPeriodChange(item)}>
-                    {periodLabel(item)}
+                {props.periods.map((item) => (
+                  <button key={item.key} className={props.period === item.key ? "active" : ""} disabled={!item.available} onClick={() => props.onPeriodChange(item.key)}>
+                    <span>{item.label}</span>
+                    <small>{item.description}</small>
                   </button>
                 ))}
               </div>
@@ -305,7 +354,7 @@ function HomePage(props: {
 function KLineChart({ bars }: { bars: PriceBar[] }) {
   const chartData = useMemo(
     () => bars.map((bar) => ({
-      time: bar.trade_date as unknown as UTCTimestamp,
+      time: bar.timestamp.includes(" ") ? (Math.floor(new Date(bar.timestamp.replace(" ", "T")).getTime() / 1000) as UTCTimestamp) : bar.trade_date as unknown as UTCTimestamp,
       open: bar.open,
       high: bar.high,
       low: bar.low,
@@ -436,15 +485,4 @@ function Placeholder({ title, text }: { title: string; text: string }) {
       <p>{text}</p>
     </section>
   );
-}
-
-function periodLabel(period: string) {
-  const labels: Record<string, string> = {
-    intraday: "分时",
-    "5d": "5日",
-    daily: "日K",
-    weekly: "周K",
-    monthly: "月K",
-  };
-  return labels[period] ?? period;
 }

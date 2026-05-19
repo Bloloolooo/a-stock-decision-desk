@@ -1,6 +1,6 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 
-from app.schemas import CashUpdate, PortfolioSummary, Position, PositionCreate
+from app.schemas import CashUpdate, PortfolioSummary, Position, PositionCreate, PositionSell
 from app.services.portfolio import portfolio_service
 
 router = APIRouter()
@@ -25,3 +25,12 @@ def get_positions() -> list[Position]:
 @router.post("/positions", response_model=Position)
 def upsert_position(payload: PositionCreate) -> Position:
     return portfolio_service.upsert_position(payload)
+
+
+@router.post("/sell", response_model=PortfolioSummary)
+def sell_position(payload: PositionSell) -> PortfolioSummary:
+    try:
+        portfolio_service.sell_position(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return portfolio_service.summary()

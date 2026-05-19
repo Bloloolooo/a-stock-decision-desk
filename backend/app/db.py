@@ -43,6 +43,21 @@ def init_db() -> None:
         )
         connection.execute(
             """
+            CREATE TABLE IF NOT EXISTS trade_records (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                symbol TEXT NOT NULL,
+                name TEXT NOT NULL,
+                side TEXT NOT NULL CHECK (side IN ('buy', 'sell')),
+                quantity INTEGER NOT NULL CHECK (quantity > 0),
+                price REAL NOT NULL CHECK (price > 0),
+                amount REAL NOT NULL,
+                note TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            """
             INSERT OR IGNORE INTO account (id, cash, updated_at)
             VALUES (1, 92180.0, datetime('now'))
             """

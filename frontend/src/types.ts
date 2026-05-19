@@ -18,6 +18,13 @@ export type PositionInput = {
   note?: string;
 };
 
+export type SellInput = {
+  symbol: string;
+  quantity: number;
+  sell_price: number;
+  note?: string;
+};
+
 export type PortfolioSummary = {
   total_assets: number;
   cash: number;
@@ -31,6 +38,7 @@ export type PriceBar = {
   symbol: string;
   period: string;
   trade_date: string;
+  timestamp: string;
   open: number;
   high: number;
   low: number;
@@ -45,6 +53,13 @@ export type MarketStatus = {
   description: string;
   last_error?: string | null;
   updated_at: string;
+};
+
+export type MarketPeriod = {
+  key: string;
+  label: string;
+  description: string;
+  available: boolean;
 };
 
 export type RiskAdvice = {

@@ -8,7 +8,7 @@ from typing import Protocol
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 
-from app.schemas import MarketStatus, PriceBar, StockInfo
+from app.schemas import MarketPeriod, MarketStatus, PriceBar, StockInfo
 
 
 class MarketDataProvider(Protocol):
@@ -74,6 +74,7 @@ class SampleMarketDataProvider:
                     symbol=symbol,
                     period=period,
                     trade_date=trade_date,
+                    timestamp=trade_date.isoformat(),
                     open=round(open_price, 2),
                     high=round(high, 2),
                     low=round(low, 2),
@@ -96,8 +97,6 @@ class AkShareMarketDataProvider:
         "daily": "daily",
         "weekly": "weekly",
         "monthly": "monthly",
-        "5d": "daily",
-        "intraday": "daily",
     }
 
     def __init__(self, fallback: MarketDataProvider | None = None) -> None:
@@ -146,8 +145,14 @@ class AkShareMarketDataProvider:
             self.last_error = "AkShare 未安装或无法导入"
             return self.fallback.bars(symbol=symbol, period=period, adjust=adjust)
 
-        ak_period = self.period_map.get(period, "daily")
         try:
+            if period in {"intraday", "5d"}:
+                bars = self._fetch_minute_bars(ak, symbol=symbol, period=period)
+                self.last_source = "akshare"
+                self.last_error = None
+                self._bars_cache[cache_key] = (datetime.now(), bars)
+                return bars
+            ak_period = self.period_map.get(period, "daily")
             frame = self._fetch_hist(ak, symbol=symbol, period=ak_period, adjust=adjust)
         except Exception as exc:
             try:
@@ -183,6 +188,7 @@ class AkShareMarketDataProvider:
                     symbol=symbol,
                     period=period,
                     trade_date=row["日期"],
+                    timestamp=str(row["日期"]),
                     open=float(row["开盘"]),
                     high=float(row["最高"]),
                     low=float(row["最低"]),
@@ -210,15 +216,50 @@ class AkShareMarketDataProvider:
                     time.sleep(0.8)
         raise last_error if last_error else RuntimeError("AkShare 请求失败")
 
+    def _fetch_minute_bars(self, ak, symbol: str, period: str) -> list[PriceBar]:
+        frame = ak.stock_zh_a_minute(symbol=self._sina_symbol(symbol), period="1", adjust="")
+        if frame.empty:
+            raise RuntimeError("AkShare 分钟行情返回空数据")
+        frame = frame.tail(1200 if period == "5d" else 300)
+        bars: list[PriceBar] = []
+        now = datetime.now()
+        for row in frame.to_dict("records"):
+            timestamp = str(row["day"])
+            close = float(row["close"])
+            volume = float(row.get("volume", 0))
+            bars.append(
+                PriceBar(
+                    symbol=symbol,
+                    period=period,
+                    trade_date=timestamp.split(" ")[0],
+                    timestamp=timestamp,
+                    open=float(row["open"]),
+                    high=float(row["high"]),
+                    low=float(row["low"]),
+                    close=close,
+                    volume=volume,
+                    amount=float(row.get("amount", volume * close)),
+                    turnover_rate=None,
+                    adjust="",
+                    updated_at=now,
+                )
+            )
+        return bars
+
     def _fetch_sina_bars(self, symbol: str, period: str, adjust: str) -> list[PriceBar]:
-        if period not in {"daily", "5d", "intraday"}:
+        if period not in {"daily", "weekly", "monthly", "5d", "intraday"}:
             raise RuntimeError(f"Sina K 线暂不支持周期 {period}")
+        if period in {"weekly", "monthly"}:
+            return self._aggregate_sina_daily(symbol=symbol, period=period, adjust=adjust)
+
         market_symbol = self._sina_symbol(symbol)
         callback = f"var _{symbol}_"
+        scale = 1 if period in {"intraday", "5d"} else 240
+        datalen = 1200 if period == "5d" else 300 if period == "intraday" else 180
         url = (
             "https://quotes.sina.cn/cn/api/jsonp.php/"
             f"{quote(callback)}/CN_MarketDataService.getKLineData"
-            f"?symbol={market_symbol}&scale=240&ma=no&datalen=180"
+            f"?symbol={market_symbol}&scale={scale}&ma=no&datalen={datalen}"
         )
         request = Request(
             url,
@@ -239,13 +280,15 @@ class AkShareMarketDataProvider:
         bars: list[PriceBar] = []
         now = datetime.now()
         for row in rows:
+            timestamp = row["day"]
             close = float(row["close"])
             volume = float(row.get("volume", 0))
             bars.append(
                 PriceBar(
                     symbol=symbol,
                     period=period,
-                    trade_date=row["day"],
+                    trade_date=timestamp.split(" ")[0],
+                    timestamp=timestamp,
                     open=float(row["open"]),
                     high=float(row["high"]),
                     low=float(row["low"]),
@@ -258,6 +301,44 @@ class AkShareMarketDataProvider:
                 )
             )
         return bars
+
+    def _aggregate_sina_daily(self, symbol: str, period: str, adjust: str) -> list[PriceBar]:
+        daily_bars = self._fetch_sina_bars(symbol=symbol, period="daily", adjust=adjust)
+        grouped: dict[str, list[PriceBar]] = {}
+        for bar in daily_bars:
+            day = date.fromisoformat(bar.trade_date.isoformat())
+            if period == "weekly":
+                year, week, _ = day.isocalendar()
+                key = f"{year}-W{week:02d}"
+            else:
+                key = day.strftime("%Y-%m")
+            grouped.setdefault(key, []).append(bar)
+
+        bars: list[PriceBar] = []
+        now = datetime.now()
+        for group in grouped.values():
+            first = group[0]
+            last = group[-1]
+            volume = sum(bar.volume for bar in group)
+            amount = sum(bar.amount for bar in group)
+            bars.append(
+                PriceBar(
+                    symbol=symbol,
+                    period=period,
+                    trade_date=last.trade_date,
+                    timestamp=last.trade_date.isoformat(),
+                    open=first.open,
+                    high=max(bar.high for bar in group),
+                    low=min(bar.low for bar in group),
+                    close=last.close,
+                    volume=round(volume, 2),
+                    amount=round(amount, 2),
+                    turnover_rate=None,
+                    adjust=adjust,
+                    updated_at=now,
+                )
+            )
+        return bars[-180:]
 
     def _sina_symbol(self, symbol: str) -> str:
         return f"sh{symbol}" if symbol.startswith("6") else f"sz{symbol}"
@@ -290,3 +371,13 @@ def market_status() -> MarketStatus:
         last_error=market_data.last_error,
         updated_at=datetime.now(),
     )
+
+
+def market_periods() -> list[MarketPeriod]:
+    return [
+        MarketPeriod(key="intraday", label="分时", description="1 分钟线"),
+        MarketPeriod(key="5d", label="5日", description="近 5 日 1 分钟线"),
+        MarketPeriod(key="daily", label="日K", description="日线"),
+        MarketPeriod(key="weekly", label="周K", description="周线"),
+        MarketPeriod(key="monthly", label="月K", description="月线"),
+    ]
