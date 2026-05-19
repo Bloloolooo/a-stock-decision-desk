@@ -422,10 +422,31 @@ function StockTabs(props: { positions: Position[]; selectedSymbol: string; onSel
   );
 }
 
+function chinaMarketTime(bar: PriceBar): UTCTimestamp | string {
+  if (!bar.timestamp.includes(" ")) {
+    return bar.trade_date;
+  }
+  const match = bar.timestamp.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?/);
+  if (!match) {
+    return bar.trade_date;
+  }
+  const [, year, month, day, hour, minute, second = "00"] = match;
+  return Math.floor(
+    Date.UTC(
+      Number(year),
+      Number(month) - 1,
+      Number(day),
+      Number(hour),
+      Number(minute),
+      Number(second),
+    ) / 1000,
+  ) as UTCTimestamp;
+}
+
 function KLineChart({ bars, mode = "normal" }: { bars: PriceBar[]; mode?: "normal" | "fullscreen" }) {
   const chartData = useMemo(
     () => bars.map((bar) => ({
-      time: bar.timestamp.includes(" ") ? (Math.floor(new Date(bar.timestamp.replace(" ", "T")).getTime() / 1000) as UTCTimestamp) : bar.trade_date as unknown as UTCTimestamp,
+      time: chinaMarketTime(bar),
       open: bar.open,
       high: bar.high,
       low: bar.low,
