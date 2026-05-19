@@ -33,13 +33,30 @@ class RiskService:
         position_ratio = current_market_value / summary.total_assets if summary.total_assets else 0.0
         max_buy_amount = max(0.0, suggested_max_amount - current_market_value)
         single_stock_risk = max(current_price - stop_loss_price, 0) * (position.quantity if position else 0)
+        stop_loss_gap = (current_price - stop_loss_price) / current_price if current_price else 0
+        cash_ratio = summary.cash / summary.total_assets if summary.total_assets else 0
 
         if position_ratio > 0.35:
-            message = "当前持仓偏高，优先控制回撤；跌破止损线后应减仓。"
+            message = "当前单票仓位已经高于建议上沿，先守纪律，新增资金不要再追。"
+            action_suggestions = [
+                f"若跌破 {stop_loss_price:.2f}，先卖出 1/3 到 1/2，避免单票回撤扩大。",
+                "若继续放量上攻，只做移动止盈，不再主动加仓。",
+                f"把单票仓位降回 {(0.35 * 100):.0f}% 以内后，再考虑下一笔交易。",
+            ]
         elif max_buy_amount > 0:
-            message = "当前仓位未超上限；若趋势和量能继续确认，可小额加仓。"
+            message = "当前仓位仍有余量，但只适合分批，不适合一次打满。"
+            action_suggestions = [
+                f"单次加仓不超过 {round(max_buy_amount / 2, 2)} 元，留一半额度等回踩确认。",
+                f"价格接近 {stop_loss_price:.2f} 且无量能修复时，不做补仓摊平。",
+                "若收盘仍站稳短期均线，再把它纳入下一次加仓候选。",
+            ]
         else:
-            message = "当前仓位接近建议上限，继续观察走势和成交量。"
+            message = "当前仓位接近模型上限，下一步重点是持仓管理，不是扩大风险。"
+            action_suggestions = [
+                "保持观察，等待放量突破或回踩不破后再更新计划。",
+                f"跌破 {stop_loss_price:.2f} 先执行减仓，盈利票可以用移动止盈替代固定止损。",
+                "没有新增胜率信息时，不提高仓位上限。",
+            ]
 
         return RiskAdvice(
             symbol=symbol,
@@ -52,7 +69,13 @@ class RiskService:
             stop_loss_price=stop_loss_price,
             single_stock_risk=round(single_stock_risk, 2),
             message=message,
-            signal_sources=["趋势强度：基于当前行情源", "量能：近期放大", "凯利：使用 0.25 分数凯利"],
+            signal_sources=[
+                f"仓位：当前单票约 {position_ratio * 100:.1f}%，建议区间 25%-35%",
+                f"风控：止损距离约 {stop_loss_gap * 100:.1f}%，单票风险 {round(single_stock_risk, 2)} 元",
+                f"资金：现金占比约 {cash_ratio * 100:.1f}%，最大可加仓 {round(max_buy_amount, 2)} 元",
+                "凯利：默认胜率 52%、盈亏比 1.45、使用 0.25 分数凯利",
+            ],
+            action_suggestions=action_suggestions,
             kelly_enabled=True,
             updated_at=datetime.now(),
         )

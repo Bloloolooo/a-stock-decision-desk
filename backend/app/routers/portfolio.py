@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException
 
-from app.schemas import CashUpdate, PortfolioSummary, Position, PositionCreate, PositionSell
+from app.schemas import CashUpdate, PortfolioSummary, Position, PositionCreate, PositionSell, TradeRecord
 from app.services.portfolio import portfolio_service
 
 router = APIRouter()
@@ -20,6 +20,11 @@ def update_cash(payload: CashUpdate) -> PortfolioSummary:
 @router.get("/positions", response_model=list[Position])
 def get_positions() -> list[Position]:
     return portfolio_service.positions()
+
+
+@router.get("/trades", response_model=list[TradeRecord])
+def get_trade_records(limit: int = 100) -> list[TradeRecord]:
+    return portfolio_service.trade_records(limit=min(max(limit, 1), 300))
 
 
 @router.post("/positions", response_model=Position)

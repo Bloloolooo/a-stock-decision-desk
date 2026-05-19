@@ -19,6 +19,18 @@ class PositionSell(BaseModel):
     note: str = ""
 
 
+class TradeRecord(BaseModel):
+    id: int
+    symbol: str
+    name: str
+    side: Literal["buy", "sell"]
+    quantity: int
+    price: float
+    amount: float
+    note: str = ""
+    created_at: datetime
+
+
 class Position(PositionCreate):
     last_price: float
     market_value: float
@@ -88,6 +100,7 @@ class RiskAdvice(BaseModel):
     single_stock_risk: float
     message: str
     signal_sources: list[str]
+    action_suggestions: list[str]
     kelly_enabled: bool
     updated_at: datetime
 

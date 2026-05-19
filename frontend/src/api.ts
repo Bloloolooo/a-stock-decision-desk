@@ -1,4 +1,4 @@
-import type { MarketPeriod, MarketStatus, PortfolioSummary, Position, PositionInput, PriceBar, RiskAdvice, ScreenerResult, SellInput } from "./types";
+import type { MarketPeriod, MarketStatus, PortfolioSummary, Position, PositionInput, PriceBar, RiskAdvice, ScreenerResult, SellInput, TradeRecord } from "./types";
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? "http://localhost:8000/api";
 
@@ -25,6 +25,7 @@ async function postJson<T>(path: string, payload: unknown): Promise<T> {
 export const api = {
   summary: () => getJson<PortfolioSummary>("/portfolio/summary"),
   positions: () => getJson<Position[]>("/portfolio/positions"),
+  trades: () => getJson<TradeRecord[]>("/portfolio/trades"),
   updateCash: (cash: number) => postJson<PortfolioSummary>("/portfolio/cash", { cash }),
   upsertPosition: (position: PositionInput) => postJson<Position>("/portfolio/positions", position),
   sellPosition: (position: SellInput) => postJson<PortfolioSummary>("/portfolio/sell", position),

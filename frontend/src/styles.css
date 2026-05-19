@@ -266,7 +266,7 @@ td small {
   padding: 0;
   overflow: hidden;
   display: grid;
-  grid-template-rows: auto minmax(430px, 1fr) auto;
+  grid-template-rows: auto auto minmax(430px, 1fr) auto;
 }
 
 .chart-header {
@@ -275,6 +275,45 @@ td small {
   gap: 14px;
   padding: 12px 14px;
   border-bottom: 1px solid #e0e8f1;
+}
+
+.stock-tabs {
+  display: flex;
+  gap: 6px;
+  padding: 8px 10px;
+  overflow-x: auto;
+  border-bottom: 1px solid #e0e8f1;
+  background: #f7fafc;
+}
+
+.stock-tabs button {
+  min-width: 92px;
+  border: 1px solid #ccd8e6;
+  border-radius: 6px;
+  padding: 6px 9px;
+  background: #fff;
+  color: #405064;
+  cursor: pointer;
+  text-align: left;
+}
+
+.stock-tabs button span,
+.stock-tabs button small {
+  display: block;
+  line-height: 1.2;
+}
+
+.stock-tabs button small {
+  margin-top: 2px;
+  color: #68758a;
+  font-size: 10px;
+}
+
+.stock-tabs .active {
+  border-color: #1f4f8f;
+  background: #eaf2fb;
+  color: #163b70;
+  font-weight: 800;
 }
 
 .chart-header h2 {
@@ -362,6 +401,81 @@ td small {
 .chart-canvas {
   min-height: 430px;
   background: #0f1724;
+}
+
+.chart-canvas[data-mode="fullscreen"] {
+  min-height: 0;
+  height: calc(100vh - 132px);
+}
+
+.fullscreen-chart {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  grid-template-rows: auto auto 1fr;
+  background: #07101d;
+  color: #dce7f5;
+}
+
+.fullscreen-top {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px;
+  border-bottom: 1px solid #20314b;
+}
+
+.fullscreen-top .stock-tabs {
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.fullscreen-top .stock-tabs button {
+  border-color: #273a59;
+  background: #101d2f;
+  color: #dce7f5;
+}
+
+.fullscreen-top .stock-tabs .active {
+  background: #1f4f8f;
+  color: #fff;
+}
+
+.close-button {
+  border: 1px solid #4f6f99;
+  border-radius: 6px;
+  padding: 8px 12px;
+  background: #15243a;
+  color: #fff;
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.fullscreen-toolbar {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  align-items: center;
+  padding: 10px 14px;
+  border-bottom: 1px solid #20314b;
+}
+
+.fullscreen-toolbar h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.fullscreen-toolbar h2 span,
+.fullscreen-toolbar p {
+  color: #9aa8bd;
+}
+
+.fullscreen-toolbar p {
+  margin: 4px 0 0;
+  font-size: 12px;
 }
 
 .position-strip {
@@ -453,13 +567,15 @@ td small {
   border-bottom: 1px solid #e4ebf3;
 }
 
-.result-list table {
+.result-list table,
+.trade-table table {
   width: 100%;
   border-collapse: collapse;
   font-size: 12px;
 }
 
-.result-list th {
+.result-list th,
+.trade-table th {
   padding: 9px;
   background: #f8fbfe;
   color: #68758a;
@@ -467,7 +583,8 @@ td small {
   font-weight: 700;
 }
 
-.result-list td {
+.result-list td,
+.trade-table td {
   padding: 10px 9px;
   border-top: 1px solid #edf2f7;
 }
@@ -483,4 +600,60 @@ td small {
   align-content: center;
   justify-items: center;
   text-align: center;
+}
+
+.review-grid,
+.settings-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.review-summary {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.trade-table {
+  padding: 0;
+  overflow: hidden;
+}
+
+.trade-table .panel-title {
+  padding: 12px;
+  border-bottom: 1px solid #e4ebf3;
+}
+
+.settings-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: start;
+}
+
+.settings-card {
+  display: grid;
+  gap: 12px;
+}
+
+.settings-card label {
+  display: grid;
+  gap: 6px;
+  color: #667085;
+  font-size: 12px;
+}
+
+.settings-card select {
+  width: 160px;
+  border: 1px solid #cbd7e6;
+  border-radius: 6px;
+  padding: 7px 8px;
+  background: #fff;
+  color: #405064;
+}
+
+.settings-static {
+  display: grid;
+  gap: 8px;
 }

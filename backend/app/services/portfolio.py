@@ -2,7 +2,7 @@ from datetime import datetime
 from sqlite3 import Row
 
 from app.db import get_connection, init_db
-from app.schemas import PortfolioSummary, Position, PositionCreate, PositionSell
+from app.schemas import PortfolioSummary, Position, PositionCreate, PositionSell, TradeRecord
 from app.services.market_data import market_data
 
 
@@ -109,6 +109,32 @@ class PortfolioService:
                 "SELECT symbol, name, quantity, average_cost, note FROM positions ORDER BY updated_at DESC"
             ).fetchall()
         return [self._position_view(self._position_from_row(row)) for row in rows]
+
+    def trade_records(self, limit: int = 100) -> list[TradeRecord]:
+        with get_connection() as connection:
+            rows = connection.execute(
+                """
+                SELECT id, symbol, name, side, quantity, price, amount, note, created_at
+                FROM trade_records
+                ORDER BY datetime(created_at) DESC, id DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        return [
+            TradeRecord(
+                id=int(row["id"]),
+                symbol=row["symbol"],
+                name=row["name"],
+                side=row["side"],
+                quantity=int(row["quantity"]),
+                price=round(float(row["price"]), 2),
+                amount=round(float(row["amount"]), 2),
+                note=row["note"],
+                created_at=datetime.fromisoformat(row["created_at"]),
+            )
+            for row in rows
+        ]
 
     def summary(self) -> PortfolioSummary:
         positions = self.positions()

@@ -74,8 +74,21 @@ export type RiskAdvice = {
   single_stock_risk: number;
   message: string;
   signal_sources: string[];
+  action_suggestions: string[];
   kelly_enabled: boolean;
   updated_at: string;
+};
+
+export type TradeRecord = {
+  id: number;
+  symbol: string;
+  name: string;
+  side: "buy" | "sell";
+  quantity: number;
+  price: number;
+  amount: number;
+  note: string;
+  created_at: string;
 };
 
 export type ScreenerResult = {

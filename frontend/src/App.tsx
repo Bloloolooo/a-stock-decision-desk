@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createChart, ColorType, type IChartApi, type UTCTimestamp } from "lightweight-charts";
 
 import { api } from "./api";
-import type { MarketPeriod, MarketStatus, PortfolioSummary, Position, PriceBar, RiskAdvice, ScreenerResult } from "./types";
+import type { MarketPeriod, MarketStatus, PortfolioSummary, Position, PriceBar, RiskAdvice, ScreenerResult, TradeRecord } from "./types";
 
 const emptySummary: PortfolioSummary = {
   total_assets: 0,
@@ -39,6 +39,7 @@ export default function App() {
   const [period, setPeriod] = useState("daily");
   const [summary, setSummary] = useState<PortfolioSummary>(emptySummary);
   const [positions, setPositions] = useState<Position[]>([]);
+  const [trades, setTrades] = useState<TradeRecord[]>([]);
   const [bars, setBars] = useState<PriceBar[]>([]);
   const [risk, setRisk] = useState<RiskAdvice | null>(null);
   const [trend, setTrend] = useState<ScreenerResult[]>([]);
@@ -49,10 +50,11 @@ export default function App() {
   const [status, setStatus] = useState("加载中");
 
   const reloadPortfolio = () => {
-    return Promise.all([api.summary(), api.positions()])
-      .then(([summaryData, positionData]) => {
+    return Promise.all([api.summary(), api.positions(), api.trades()])
+      .then(([summaryData, positionData, tradeData]) => {
         setSummary(summaryData);
         setPositions(positionData);
+        setTrades(tradeData);
       });
   };
 
@@ -74,10 +76,11 @@ export default function App() {
   };
 
   useEffect(() => {
-    Promise.all([api.summary(), api.positions(), api.screener("trend"), api.screener("rebound"), api.marketStatus(), api.marketPeriods()])
-      .then(([summaryData, positionData, trendData, reboundData, marketStatusData, periodData]) => {
+    Promise.all([api.summary(), api.positions(), api.trades(), api.screener("trend"), api.screener("rebound"), api.marketStatus(), api.marketPeriods()])
+      .then(([summaryData, positionData, tradeData, trendData, reboundData, marketStatusData, periodData]) => {
         setSummary(summaryData);
         setPositions(positionData);
+        setTrades(tradeData);
         setTrend(trendData);
         setRebound(reboundData);
         setMarketStatus(marketStatusData);
@@ -143,8 +146,14 @@ export default function App() {
           }}
         />
       )}
-      {tab === "review" && <Placeholder title="策略回看" text="这里会展示历史榜单、候选后续表现和交易备注复盘。" />}
-      {tab === "settings" && <Placeholder title="设置" text="这里会配置数据源、风险参数、指标参数和本地备份。" />}
+      {tab === "review" && <ReviewPage trades={trades} positions={positions} summary={summary} />}
+      {tab === "settings" && (
+        <SettingsPage
+          marketStatus={marketStatus}
+          autoRefreshSeconds={autoRefreshSeconds}
+          onAutoRefreshSecondsChange={setAutoRefreshSeconds}
+        />
+      )}
     </div>
   );
 }
@@ -178,6 +187,7 @@ function HomePage(props: {
     quantity: "",
     sell_price: "",
   });
+  const [fullscreen, setFullscreen] = useState(false);
   const [formStatus, setFormStatus] = useState("");
 
   useEffect(() => {
@@ -295,6 +305,7 @@ function HomePage(props: {
         </aside>
 
         <section className="panel chart-panel">
+          <StockTabs positions={props.positions} selectedSymbol={props.selectedSymbol} onSelectSymbol={props.onSelectSymbol} />
           <div className="chart-header">
             <div>
               <h2>{props.risk?.name ?? selectedPosition?.name ?? props.selectedSymbol} <span>{props.selectedSymbol}</span></h2>
@@ -318,6 +329,7 @@ function HomePage(props: {
                   <option value={0}>暂停</option>
                 </select>
                 <button className="refresh-button" onClick={props.onRefreshMarket}>刷新行情</button>
+                <button className="refresh-button" onClick={() => setFullscreen(true)}>全屏</button>
               </div>
             </div>
           </div>
@@ -343,15 +355,64 @@ function HomePage(props: {
           </section>
           <details className="panel advice-drawer">
             <summary>操作建议</summary>
-            <p>当前最大可加仓金额：{props.risk ? yuan(props.risk.max_buy_amount) : "--"}。跌破止损线后优先减仓，任何操作都应结合盘中成交量确认。</p>
+            <ul className="signals">
+              {(props.risk?.action_suggestions ?? ["等待数据"]).map((item) => <li key={item}>{item}</li>)}
+            </ul>
           </details>
         </aside>
       </main>
+      {fullscreen && (
+        <div className="fullscreen-chart" role="dialog" aria-modal="true">
+          <div className="fullscreen-top">
+            <StockTabs positions={props.positions} selectedSymbol={props.selectedSymbol} onSelectSymbol={props.onSelectSymbol} />
+            <button className="close-button" onClick={() => setFullscreen(false)}>退出全屏</button>
+          </div>
+          <div className="fullscreen-toolbar">
+            <div>
+              <h2>{props.risk?.name ?? selectedPosition?.name ?? props.selectedSymbol} <span>{props.selectedSymbol}</span></h2>
+              <p>现价 {props.risk?.current_price.toFixed(2) ?? "--"} · {props.marketStatus?.description ?? "--"}</p>
+            </div>
+            <div className="periods">
+              {props.periods.map((item) => (
+                <button key={item.key} className={props.period === item.key ? "active" : ""} disabled={!item.available} onClick={() => props.onPeriodChange(item.key)}>
+                  <span>{item.label}</span>
+                  <small>{item.description}</small>
+                </button>
+              ))}
+            </div>
+          </div>
+          <KLineChart bars={props.bars} mode="fullscreen" />
+        </div>
+      )}
     </>
   );
 }
 
-function KLineChart({ bars }: { bars: PriceBar[] }) {
+function StockTabs(props: { positions: Position[]; selectedSymbol: string; onSelectSymbol: (symbol: string) => void }) {
+  const hasSelectedPosition = props.positions.some((position) => position.symbol === props.selectedSymbol);
+  return (
+    <div className="stock-tabs">
+      {!hasSelectedPosition && (
+        <button className="active" onClick={() => props.onSelectSymbol(props.selectedSymbol)}>
+          <span>{props.selectedSymbol}</span>
+          <small>当前查看</small>
+        </button>
+      )}
+      {props.positions.map((position) => (
+        <button
+          key={position.symbol}
+          className={props.selectedSymbol === position.symbol ? "active" : ""}
+          onClick={() => props.onSelectSymbol(position.symbol)}
+        >
+          <span>{position.name}</span>
+          <small>{position.symbol}</small>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function KLineChart({ bars, mode = "normal" }: { bars: PriceBar[]; mode?: "normal" | "fullscreen" }) {
   const chartData = useMemo(
     () => bars.map((bar) => ({
       time: bar.timestamp.includes(" ") ? (Math.floor(new Date(bar.timestamp.replace(" ", "T")).getTime() / 1000) as UTCTimestamp) : bar.trade_date as unknown as UTCTimestamp,
@@ -366,6 +427,7 @@ function KLineChart({ bars }: { bars: PriceBar[] }) {
   return (
     <div
       className="chart-canvas"
+      data-mode={mode}
       ref={(container) => {
         if (!container || chartData.length === 0) return;
         container.replaceChildren();
@@ -448,6 +510,88 @@ function ResultList(props: { title: string; subtitle: string; rows: ScreenerResu
         </tbody>
       </table>
     </section>
+  );
+}
+
+function ReviewPage(props: { trades: TradeRecord[]; positions: Position[]; summary: PortfolioSummary }) {
+  const buyAmount = props.trades.filter((trade) => trade.side === "buy").reduce((sum, trade) => sum + trade.amount, 0);
+  const sellAmount = props.trades.filter((trade) => trade.side === "sell").reduce((sum, trade) => sum + trade.amount, 0);
+  const activePositionCount = props.positions.length;
+
+  return (
+    <main className="review-grid">
+      <section className="panel review-summary">
+        <Metric label="交易记录" value={`${props.trades.length} 笔`} />
+        <Metric label="当前持仓" value={`${activePositionCount} 只`} />
+        <Metric label="累计买入" value={yuan(buyAmount)} />
+        <Metric label="累计卖出" value={yuan(sellAmount)} />
+        <Metric label="当前浮盈" value={signed(props.summary.floating_pnl)} tone={props.summary.floating_pnl >= 0 ? "up" : "down"} />
+      </section>
+      <section className="panel trade-table">
+        <div className="panel-title">
+          <div>
+            <h2>交易回看</h2>
+            <p>先把买卖记录跑通，后续可以叠加信号触发、策略版本和复盘标签。</p>
+          </div>
+        </div>
+        <table>
+          <thead>
+            <tr><th>时间</th><th>股票</th><th>方向</th><th>数量</th><th>价格</th><th>金额</th><th>备注</th></tr>
+          </thead>
+          <tbody>
+            {props.trades.map((trade) => (
+              <tr key={trade.id}>
+                <td>{new Date(trade.created_at).toLocaleString("zh-CN", { hour12: false })}</td>
+                <td><strong>{trade.name}</strong><small>{trade.symbol}</small></td>
+                <td className={trade.side === "buy" ? "up" : "down"}>{trade.side === "buy" ? "买入" : "卖出"}</td>
+                <td>{trade.quantity}</td>
+                <td>{trade.price.toFixed(2)}</td>
+                <td>{yuan(trade.amount)}</td>
+                <td>{trade.note || "--"}</td>
+              </tr>
+            ))}
+            {props.trades.length === 0 && (
+              <tr><td colSpan={7}>暂无交易记录。</td></tr>
+            )}
+          </tbody>
+        </table>
+      </section>
+    </main>
+  );
+}
+
+function SettingsPage(props: { marketStatus: MarketStatus | null; autoRefreshSeconds: number; onAutoRefreshSecondsChange: (seconds: number) => void }) {
+  return (
+    <main className="settings-grid">
+      <section className="panel settings-card">
+        <h2>行情与刷新</h2>
+        <label>
+          自动刷新
+          <select value={props.autoRefreshSeconds} onChange={(event) => props.onAutoRefreshSecondsChange(Number(event.target.value))}>
+            <option value={5}>5 秒</option>
+            <option value={10}>10 秒</option>
+            <option value={30}>30 秒</option>
+            <option value={60}>60 秒</option>
+            <option value={0}>暂停</option>
+          </select>
+        </label>
+        <MiniStat label="当前数据源" value={props.marketStatus?.description ?? "等待连接"} />
+        <MiniStat label="底层提供方" value={props.marketStatus?.provider ?? "--"} />
+      </section>
+      <section className="panel settings-card">
+        <h2>风险参数</h2>
+        <div className="settings-static">
+          <MiniStat label="单票建议仓位" value="25%-35%" />
+          <MiniStat label="单次账户风险" value="1.2%" />
+          <MiniStat label="凯利折扣" value="0.25 分数凯利" />
+          <MiniStat label="默认止损" value="现价下方 5.2%" />
+        </div>
+      </section>
+      <section className="panel settings-card">
+        <h2>策略版本</h2>
+        <p>当前策略以持仓风险、分数凯利、止损距离和现金占比为核心。选股雷达下一步会把趋势追强、超跌修复和行业强度接到真实行情池。</p>
+      </section>
+    </main>
   );
 }
 
