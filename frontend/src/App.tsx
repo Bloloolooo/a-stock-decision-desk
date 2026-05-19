@@ -50,11 +50,13 @@ export default function App() {
   const [status, setStatus] = useState("加载中");
 
   const reloadPortfolio = () => {
-    return Promise.all([api.summary(), api.positions(), api.trades()])
-      .then(([summaryData, positionData, tradeData]) => {
+    return Promise.all([api.summary(), api.positions()])
+      .then(([summaryData, positionData]) => {
         setSummary(summaryData);
         setPositions(positionData);
-        setTrades(tradeData);
+        return api.trades()
+          .then(setTrades)
+          .catch(() => undefined);
       });
   };
 
@@ -205,26 +207,34 @@ function HomePage(props: {
   };
 
   const savePosition = async () => {
-    await api.upsertPosition({
-      symbol: positionForm.symbol.trim(),
-      quantity: Number(positionForm.quantity),
-      average_cost: Number(positionForm.average_cost),
-    });
-    await props.onPortfolioChange();
-    props.onSelectSymbol(positionForm.symbol.trim());
-    setPositionForm({ symbol: "", quantity: "", average_cost: "" });
-    setFormStatus("持仓已保存");
+    try {
+      await api.upsertPosition({
+        symbol: positionForm.symbol.trim(),
+        quantity: Number(positionForm.quantity),
+        average_cost: Number(positionForm.average_cost),
+      });
+      await props.onPortfolioChange();
+      props.onSelectSymbol(positionForm.symbol.trim());
+      setPositionForm({ symbol: "", quantity: "", average_cost: "" });
+      setFormStatus("持仓已保存");
+    } catch {
+      setFormStatus("保存失败，请检查代码、数量和后端连接。");
+    }
   };
 
   const sellPosition = async () => {
-    await api.sellPosition({
-      symbol: sellForm.symbol.trim(),
-      quantity: Number(sellForm.quantity),
-      sell_price: Number(sellForm.sell_price),
-    });
-    await props.onPortfolioChange();
-    setSellForm({ symbol: props.selectedSymbol, quantity: "", sell_price: "" });
-    setFormStatus("卖出已记录");
+    try {
+      await api.sellPosition({
+        symbol: sellForm.symbol.trim(),
+        quantity: Number(sellForm.quantity),
+        sell_price: Number(sellForm.sell_price),
+      });
+      await props.onPortfolioChange();
+      setSellForm({ symbol: props.selectedSymbol, quantity: "", sell_price: "" });
+      setFormStatus("卖出已记录");
+    } catch {
+      setFormStatus("卖出失败，请检查持仓数量和后端连接。");
+    }
   };
 
   return (
