@@ -496,23 +496,29 @@ function KLineChart({ bars, mode = "normal" }: { bars: PriceBar[]; mode?: "norma
 }
 
 function ScreenerPage(props: { trend: ScreenerResult[]; rebound: ScreenerResult[]; onOpen: (symbol: string) => void }) {
+  const allRows = [...props.trend, ...props.rebound];
+  const generatedAt = allRows[0]?.generated_at ? new Date(allRows[0].generated_at).toLocaleString("zh-CN", { hour12: false }) : "--";
+  const passCount = allRows.filter((row) => row.risk_status === "通过").length;
+  const strongCount = props.trend.filter((row) => row.score >= 75).length;
+  const reboundCount = props.rebound.filter((row) => row.score >= 70).length;
   return (
     <main className="screener-grid">
       <aside className="panel filters">
         <h2>筛选条件</h2>
-        <Filter label="市场" value="沪深 A 股" />
+        <Filter label="市场" value="沪深 A 股核心池" />
         <Filter label="周期" value="短线 / 波段" />
-        <Filter label="行业" value="全部" />
-        <Filter label="流动性" value="成交额 > 3 亿" />
+        <Filter label="策略" value="趋势追强 + 超跌修复" />
+        <Filter label="流动性" value="5日均额 > 3000 万" />
         <Filter label="风险过滤" value="开启" />
-        <div className="filter-note">排除 ST、停牌、退市风险、流动性过低和连续一字板不可交易标的。</div>
+        <div className="filter-note">当前先扫描核心股票池，基于真实日 K 计算涨跌幅、均线、回撤、量能和风险状态。下一步可升级为盘后全 A 股缓存扫描。</div>
       </aside>
       <section className="screener-main">
         <div className="market-pulse">
-          <Metric label="今日强势行业" value="算力 / CPO" />
-          <Metric label="涨停家数" value="61" tone="up" />
-          <Metric label="跌停家数" value="9" tone="down" />
-          <Metric label="市场情绪" value="偏强" />
+          <Metric label="扫描结果" value={`${allRows.length} 条`} />
+          <Metric label="风险通过" value={`${passCount} 条`} />
+          <Metric label="强趋势" value={`${strongCount} 只`} tone={strongCount > 0 ? "up" : undefined} />
+          <Metric label="反弹候选" value={`${reboundCount} 只`} tone={reboundCount > 0 ? "up" : undefined} />
+          <Metric label="生成时间" value={generatedAt} />
         </div>
         <div className="lists-grid">
           <ResultList title="趋势追强榜" subtitle="找正在走强的行业龙头和趋势候选" rows={props.trend} onOpen={props.onOpen} />
@@ -535,7 +541,7 @@ function ResultList(props: { title: string; subtitle: string; rows: ScreenerResu
       </div>
       <table>
         <thead>
-          <tr><th>股票</th><th>评分</th><th>涨跌</th><th>原因</th><th>动作</th></tr>
+          <tr><th>股票</th><th>评分</th><th>涨跌</th><th>原因</th><th>风险</th><th>动作</th></tr>
         </thead>
         <tbody>
           {props.rows.map((row) => (
@@ -544,9 +550,13 @@ function ResultList(props: { title: string; subtitle: string; rows: ScreenerResu
               <td className="score">{row.score}</td>
               <td className={row.change_pct >= 0 ? "up" : "down"}>{row.change_pct >= 0 ? "+" : ""}{row.change_pct.toFixed(2)}%</td>
               <td>{row.reason}</td>
+              <td>{row.risk_status}</td>
               <td><button className="link-button" onClick={() => props.onOpen(row.symbol)}>看走势</button></td>
             </tr>
           ))}
+          {props.rows.length === 0 && (
+            <tr><td colSpan={6}>暂无符合条件的候选。</td></tr>
+          )}
         </tbody>
       </table>
     </section>
