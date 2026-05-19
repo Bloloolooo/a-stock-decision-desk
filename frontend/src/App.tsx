@@ -22,7 +22,11 @@ const defaultPeriods: MarketPeriod[] = [
 ];
 
 function yuan(value: number) {
-  return `¥${value.toLocaleString("zh-CN", { maximumFractionDigits: 0 })}`;
+  return `¥${value.toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+function moneyInput(value: number) {
+  return Number.isFinite(value) ? value.toFixed(2) : "";
 }
 
 function pct(value: number) {
@@ -178,7 +182,7 @@ function HomePage(props: {
 }) {
   const selectedPosition = props.positions.find((position) => position.symbol === props.selectedSymbol);
   const symbolInputRef = useRef<HTMLInputElement>(null);
-  const [cashValue, setCashValue] = useState(String(Math.round(props.summary.cash)));
+  const [cashValue, setCashValue] = useState(moneyInput(props.summary.cash));
   const [positionForm, setPositionForm] = useState({
     symbol: "",
     quantity: "",
@@ -193,7 +197,7 @@ function HomePage(props: {
   const [formStatus, setFormStatus] = useState("");
 
   useEffect(() => {
-    setCashValue(String(Math.round(props.summary.cash)));
+    setCashValue(moneyInput(props.summary.cash));
   }, [props.summary.cash]);
 
   useEffect(() => {
@@ -201,7 +205,12 @@ function HomePage(props: {
   }, [props.selectedSymbol]);
 
   const saveCash = async () => {
-    await api.updateCash(Number(cashValue));
+    const cash = Number(cashValue);
+    if (!Number.isFinite(cash) || cash < 0) {
+      setFormStatus("现金格式有误，请输入大于等于 0 的数字。");
+      return;
+    }
+    await api.updateCash(Number(cash.toFixed(2)));
     await props.onPortfolioChange();
     setFormStatus("现金已更新");
   };
