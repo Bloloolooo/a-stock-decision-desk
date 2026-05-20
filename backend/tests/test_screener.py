@@ -63,8 +63,10 @@ def test_screener_scores_real_bars(monkeypatch) -> None:
 
     assert trend[0].symbol == "000001"
     assert "5日" in trend[0].reason
+    assert any(item["name"] == "均线结构" for item in trend[0].factors)
     assert rebound[0].symbol == "000002"
     assert "距20日高点" in rebound[0].reason
+    assert any(item["name"] == "20日回撤" for item in rebound[0].factors)
     assert any(row.risk_status == "观察：流动性偏弱" for row in trend)
 
 

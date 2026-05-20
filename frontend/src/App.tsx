@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { createChart, ColorType, type IChartApi, type UTCTimestamp } from "lightweight-charts";
 
 import { api } from "./api";
@@ -570,6 +570,7 @@ function ScreenerPage(props: { trend: ScreenerResult[]; rebound: ScreenerResult[
 }
 
 function ResultList(props: { title: string; subtitle: string; rows: ScreenerResult[]; onOpen: (symbol: string) => void }) {
+  const [showFactors, setShowFactors] = useState(false);
   return (
     <section className="panel result-list">
       <div className="panel-title">
@@ -577,7 +578,7 @@ function ResultList(props: { title: string; subtitle: string; rows: ScreenerResu
           <h2>{props.title}</h2>
           <p>{props.subtitle}</p>
         </div>
-        <button>查看因子</button>
+        <button onClick={() => setShowFactors((current) => !current)}>{showFactors ? "收起因子" : "查看因子"}</button>
       </div>
       <table>
         <thead>
@@ -585,14 +586,32 @@ function ResultList(props: { title: string; subtitle: string; rows: ScreenerResu
         </thead>
         <tbody>
           {props.rows.map((row) => (
-            <tr key={row.symbol}>
-              <td><strong>{row.name}</strong><small>{row.symbol}</small></td>
-              <td className="score">{row.score}</td>
-              <td className={row.change_pct >= 0 ? "up" : "down"}>{row.change_pct >= 0 ? "+" : ""}{row.change_pct.toFixed(2)}%</td>
-              <td>{row.reason}</td>
-              <td>{row.risk_status}</td>
-              <td><button className="link-button" onClick={() => props.onOpen(row.symbol)}>看走势</button></td>
-            </tr>
+            <Fragment key={row.symbol}>
+              <tr>
+                <td><strong>{row.name}</strong><small>{row.symbol}</small></td>
+                <td className="score">{row.score}</td>
+                <td className={row.change_pct >= 0 ? "up" : "down"}>{row.change_pct >= 0 ? "+" : ""}{row.change_pct.toFixed(2)}%</td>
+                <td>{row.reason}</td>
+                <td>{row.risk_status}</td>
+                <td><button className="link-button" onClick={() => props.onOpen(row.symbol)}>看走势</button></td>
+              </tr>
+              {showFactors && (
+                <tr className="factor-row">
+                  <td colSpan={6}>
+                    <div className="factor-grid">
+                      {row.factors.map((item) => (
+                        <div className="factor-chip" key={`${row.symbol}-${item.name}`}>
+                          <span>{item.name}</span>
+                          <strong>{item.value}</strong>
+                          <small className={item.contribution >= 0 ? "up" : "down"}>{item.contribution >= 0 ? "+" : ""}{item.contribution}</small>
+                          <em>{item.status}</em>
+                        </div>
+                      ))}
+                    </div>
+                  </td>
+                </tr>
+              )}
+            </Fragment>
           ))}
           {props.rows.length === 0 && (
             <tr><td colSpan={6}>暂无符合条件的候选。</td></tr>

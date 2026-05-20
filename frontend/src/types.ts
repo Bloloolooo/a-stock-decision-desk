@@ -99,6 +99,12 @@ export type ScreenerResult = {
   change_pct: number;
   reason: string;
   risk_status: string;
+  factors: Array<{
+    name: string;
+    value: string;
+    contribution: number;
+    status: string;
+  }>;
   generated_at: string;
 };
 

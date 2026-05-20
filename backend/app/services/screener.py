@@ -56,6 +56,15 @@ def average(values: list[float]) -> float:
     return sum(values) / len(values) if values else 0.0
 
 
+def factor(name: str, value: str, contribution: int | float, status: str) -> dict[str, str | int | float]:
+    return {
+        "name": name,
+        "value": value,
+        "contribution": contribution,
+        "status": status,
+    }
+
+
 class ScreenerService:
     def __init__(self) -> None:
         init_db()
@@ -209,15 +218,15 @@ class ScreenerService:
         ma_alignment = signal.ma5 > signal.ma10 > signal.ma20
         above_ma60 = signal.latest_close > signal.ma60
         near_high = signal.drawdown_20d > -0.04
+        change_5d_score = min(18, max(0, int(signal.change_5d * 180)))
+        change_20d_score = min(20, max(0, int(signal.change_20d * 110)))
+        ma_score = 14 if ma_alignment else 0
+        ma60_score = 8 if above_ma60 else 0
+        volume_score = min(10, max(0, int((signal.volume_ratio - 1) * 16)))
+        near_high_score = 8 if near_high else 0
+        risk_penalty = -8 if signal.risk_status != "通过" else 0
         score = 40
-        score += min(18, max(0, int(signal.change_5d * 180)))
-        score += min(20, max(0, int(signal.change_20d * 110)))
-        score += 14 if ma_alignment else 0
-        score += 8 if above_ma60 else 0
-        score += min(10, max(0, int((signal.volume_ratio - 1) * 16)))
-        score += 8 if near_high else 0
-        if signal.risk_status != "通过":
-            score -= 8
+        score += change_5d_score + change_20d_score + ma_score + ma60_score + volume_score + near_high_score + risk_penalty
         reason = " / ".join(
             [
                 f"5日{signal.change_5d * 100:+.1f}%",
@@ -226,6 +235,15 @@ class ScreenerService:
                 f"量能{signal.volume_ratio:.1f}倍",
             ]
         )
+        factors = [
+            factor("5日涨幅", f"{signal.change_5d * 100:+.1f}%", change_5d_score, "越强越好"),
+            factor("20日涨幅", f"{signal.change_20d * 100:+.1f}%", change_20d_score, "确认波段强度"),
+            factor("均线结构", "MA5 > MA10 > MA20" if ma_alignment else "未完全多头", ma_score, "趋势排列"),
+            factor("MA60位置", "站上MA60" if above_ma60 else "未站上MA60", ma60_score, "中期趋势"),
+            factor("量能", f"{signal.volume_ratio:.1f}倍", volume_score, "5日均额/20日均额"),
+            factor("20日高位", f"{signal.drawdown_20d * 100:.1f}%", near_high_score, "接近强势高位"),
+            factor("风险过滤", signal.risk_status, risk_penalty, "风险扣分"),
+        ]
         return ScreenerResult(
             list_type="trend",
             symbol=signal.symbol,
@@ -234,6 +252,7 @@ class ScreenerService:
             change_pct=round(signal.day_change * 100, 2),
             reason=reason,
             risk_status=signal.risk_status,
+            factors=factors,
             generated_at=datetime.now(),
         )
 
@@ -241,16 +260,15 @@ class ScreenerService:
         below_ma20 = signal.latest_close < signal.ma20
         stabilizing = signal.day_change > 0 and signal.rebound_from_low_20d > 0.025
         deep_drawdown = signal.drawdown_20d < -0.08
+        drawdown_score = min(24, max(0, int(abs(signal.drawdown_20d) * 150))) if deep_drawdown else 0
+        rebound_score = min(16, max(0, int(signal.rebound_from_low_20d * 120)))
+        stabilizing_score = 12 if stabilizing else 0
+        ma20_score = 10 if below_ma20 else 0
+        volume_score = min(10, max(0, int((signal.volume_ratio - 1) * 14)))
+        overheated_penalty = -15 if signal.change_20d > 0.12 else 0
+        risk_penalty = -8 if signal.risk_status != "通过" else 0
         score = 35
-        score += min(24, max(0, int(abs(signal.drawdown_20d) * 150))) if deep_drawdown else 0
-        score += min(16, max(0, int(signal.rebound_from_low_20d * 120)))
-        score += 12 if stabilizing else 0
-        score += 10 if below_ma20 else 0
-        score += min(10, max(0, int((signal.volume_ratio - 1) * 14)))
-        if signal.change_20d > 0.12:
-            score -= 15
-        if signal.risk_status != "通过":
-            score -= 8
+        score += drawdown_score + rebound_score + stabilizing_score + ma20_score + volume_score + overheated_penalty + risk_penalty
         reason = " / ".join(
             [
                 f"距20日高点{signal.drawdown_20d * 100:.1f}%",
@@ -259,6 +277,15 @@ class ScreenerService:
                 f"量能{signal.volume_ratio:.1f}倍",
             ]
         )
+        factors = [
+            factor("20日回撤", f"{signal.drawdown_20d * 100:.1f}%", drawdown_score, "跌幅充分"),
+            factor("离20日低点", f"{signal.rebound_from_low_20d * 100:+.1f}%", rebound_score, "低位修复"),
+            factor("止跌信号", "日线止跌" if stabilizing else "等待确认", stabilizing_score, "阳线/低位反弹"),
+            factor("MA20乖离", "低于MA20" if below_ma20 else "已回到MA20上方", ma20_score, "仍在低位"),
+            factor("量能", f"{signal.volume_ratio:.1f}倍", volume_score, "成交恢复"),
+            factor("过热扣分", f"20日{signal.change_20d * 100:+.1f}%", overheated_penalty, "避免追高"),
+            factor("风险过滤", signal.risk_status, risk_penalty, "风险扣分"),
+        ]
         return ScreenerResult(
             list_type="rebound",
             symbol=signal.symbol,
@@ -267,6 +294,7 @@ class ScreenerService:
             change_pct=round(signal.day_change * 100, 2),
             reason=reason,
             risk_status=signal.risk_status,
+            factors=factors,
             generated_at=datetime.now(),
         )
 

@@ -600,6 +600,44 @@ td small {
   border-top: 1px solid #edf2f7;
 }
 
+.factor-row td {
+  padding: 0 10px 12px;
+  background: #fbfdff;
+}
+
+.factor-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.factor-chip {
+  display: grid;
+  gap: 3px;
+  min-height: 74px;
+  border: 1px solid #dbe6f1;
+  border-radius: 6px;
+  padding: 8px;
+  background: #fff;
+}
+
+.factor-chip span,
+.factor-chip em {
+  color: #667085;
+  font-size: 11px;
+  font-style: normal;
+}
+
+.factor-chip strong {
+  color: #111827;
+  font-size: 13px;
+}
+
+.factor-chip small {
+  font-size: 12px;
+  font-weight: 800;
+}
+
 .score {
   color: #1f4f8f;
   font-weight: 900;

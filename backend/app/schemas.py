@@ -113,6 +113,7 @@ class ScreenerResult(BaseModel):
     change_pct: float
     reason: str
     risk_status: str
+    factors: list[dict[str, str | int | float]]
     generated_at: datetime
 
 
