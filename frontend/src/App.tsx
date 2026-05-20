@@ -21,6 +21,25 @@ const defaultPeriods: MarketPeriod[] = [
   { key: "monthly", label: "月K", description: "月线", available: true },
 ];
 
+const defaultScreenerSymbols = [
+  "300308",
+  "300502",
+  "601138",
+  "300750",
+  "600519",
+  "002594",
+  "000858",
+  "600036",
+  "601318",
+  "600276",
+  "002415",
+  "000063",
+  "603259",
+  "600795",
+  "600312",
+  "603871",
+];
+
 function yuan(value: number) {
   return `¥${value.toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
@@ -177,8 +196,10 @@ export default function App() {
         <ScreenerPage
           trend={trend}
           rebound={rebound}
+          config={screenerConfig}
           status={screenerStatus}
           onRefresh={refreshScreener}
+          onSaveSymbols={saveScreenerSymbols}
           onOpen={(symbol) => {
             setSelectedSymbol(symbol);
             setTab("home");
@@ -531,13 +552,66 @@ function KLineChart({ bars, mode = "normal" }: { bars: PriceBar[]; mode?: "norma
   );
 }
 
-function ScreenerPage(props: { trend: ScreenerResult[]; rebound: ScreenerResult[]; status: ScreenerStatus | null; onRefresh: () => Promise<void>; onOpen: (symbol: string) => void }) {
+function normalizeSymbols(symbols: string[]) {
+  const seen = new Set<string>();
+  return symbols
+    .map((symbol) => symbol.replace(/\D/g, ""))
+    .filter((symbol) => {
+      if (symbol.length !== 6 || seen.has(symbol)) return false;
+      seen.add(symbol);
+      return true;
+    });
+}
+
+function ScreenerPage(props: {
+  trend: ScreenerResult[];
+  rebound: ScreenerResult[];
+  config: ScreenerConfig | null;
+  status: ScreenerStatus | null;
+  onRefresh: () => Promise<void>;
+  onSaveSymbols: (symbols: string[]) => Promise<void>;
+  onOpen: (symbol: string) => void;
+}) {
+  const [view, setView] = useState<"lists" | "manage">("lists");
+  const [newSymbol, setNewSymbol] = useState("");
+  const [manageStatus, setManageStatus] = useState("");
   const allRows = [...props.trend, ...props.rebound];
   const generatedAt = allRows[0]?.generated_at ? new Date(allRows[0].generated_at).toLocaleString("zh-CN", { hour12: false }) : "--";
   const passCount = allRows.filter((row) => row.risk_status === "通过").length;
   const strongCount = props.trend.filter((row) => row.score >= 75).length;
   const reboundCount = props.rebound.filter((row) => row.score >= 70).length;
   const cacheAge = props.status?.cache_age_seconds == null ? "--" : `${props.status.cache_age_seconds} 秒`;
+  const configuredSymbols = props.config?.symbols ?? [];
+  const activeSymbols = props.status?.symbols ?? (configuredSymbols.length > 0 ? configuredSymbols : defaultScreenerSymbols);
+  const isUsingDefaultPool = configuredSymbols.length === 0;
+
+  const saveSymbols = async (symbols: string[], message: string) => {
+    const normalized = normalizeSymbols(symbols);
+    await props.onSaveSymbols(normalized);
+    setManageStatus(message);
+  };
+
+  const addSymbol = async () => {
+    const symbol = newSymbol.replace(/\D/g, "");
+    if (symbol.length !== 6) {
+      setManageStatus("请输入 6 位股票代码。");
+      return;
+    }
+    const base = isUsingDefaultPool ? activeSymbols : configuredSymbols;
+    await saveSymbols([...base, symbol], "股票池已新增并刷新。");
+    setNewSymbol("");
+  };
+
+  const removeSymbol = async (symbol: string) => {
+    const base = isUsingDefaultPool ? activeSymbols : configuredSymbols;
+    await saveSymbols(base.filter((item) => item !== symbol), "股票池已删除并刷新。");
+  };
+
+  const resetPool = async () => {
+    await props.onSaveSymbols([]);
+    setManageStatus("已恢复默认核心池。");
+  };
+
   return (
     <main className="screener-grid">
       <aside className="panel filters">
@@ -550,9 +624,16 @@ function ScreenerPage(props: { trend: ScreenerResult[]; rebound: ScreenerResult[
         <Filter label="股票池" value={`${props.status?.pool_size ?? 0} 只`} />
         <Filter label="缓存年龄" value={cacheAge} />
         <div className="filter-note">当前先扫描核心股票池，基于真实日 K 计算涨跌幅、均线、回撤、量能和风险状态。下一步可升级为盘后全 A 股缓存扫描。</div>
-        <button className="primary-action" onClick={props.onRefresh}>刷新扫描</button>
+        <div className="side-actions">
+          <button className="primary-action" onClick={props.onRefresh}>刷新扫描</button>
+          <button className="secondary-action" onClick={() => setView("manage")}>管理股票池</button>
+        </div>
       </aside>
       <section className="screener-main">
+        <div className="subtabs">
+          <button className={view === "lists" ? "active" : ""} onClick={() => setView("lists")}>榜单</button>
+          <button className={view === "manage" ? "active" : ""} onClick={() => setView("manage")}>管理</button>
+        </div>
         <div className="market-pulse">
           <Metric label="扫描结果" value={`${allRows.length} 条`} />
           <Metric label="风险通过" value={`${passCount} 条`} />
@@ -560,10 +641,35 @@ function ScreenerPage(props: { trend: ScreenerResult[]; rebound: ScreenerResult[
           <Metric label="反弹候选" value={`${reboundCount} 只`} tone={reboundCount > 0 ? "up" : undefined} />
           <Metric label="生成时间" value={generatedAt} />
         </div>
-        <div className="lists-grid">
-          <ResultList title="趋势追强榜" subtitle="找正在走强的行业龙头和趋势候选" rows={props.trend} onOpen={props.onOpen} />
-          <ResultList title="超跌反弹榜" subtitle="找跌幅充分但出现企稳迹象的候选" rows={props.rebound} onOpen={props.onOpen} />
-        </div>
+        {view === "lists" ? (
+          <div className="lists-grid">
+            <ResultList title="趋势追强榜" subtitle="找正在走强的行业龙头和趋势候选" rows={props.trend} onOpen={props.onOpen} />
+            <ResultList title="超跌反弹榜" subtitle="找跌幅充分但出现企稳迹象的候选" rows={props.rebound} onOpen={props.onOpen} />
+          </div>
+        ) : (
+          <section className="panel pool-manager">
+            <div className="panel-title">
+              <div>
+                <h2>股票池管理</h2>
+                <p>{isUsingDefaultPool ? "当前使用默认核心池。删除任意代码后会转为自定义股票池。" : "当前使用自定义股票池。"}</p>
+              </div>
+              <button onClick={resetPool}>恢复默认</button>
+            </div>
+            <div className="pool-add">
+              <input value={newSymbol} onChange={(event) => setNewSymbol(event.target.value)} placeholder="输入 6 位代码" inputMode="numeric" />
+              <button className="primary-action" onClick={addSymbol}>添加</button>
+            </div>
+            <div className="pool-list">
+              {activeSymbols.map((symbol) => (
+                <div className="pool-item" key={symbol}>
+                  <strong>{symbol}</strong>
+                  <button onClick={() => removeSymbol(symbol)}>删除</button>
+                </div>
+              ))}
+            </div>
+            {manageStatus && <p>{manageStatus}</p>}
+          </section>
+        )}
       </section>
     </main>
   );
