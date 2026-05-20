@@ -101,3 +101,17 @@ export type ScreenerResult = {
   risk_status: string;
   generated_at: string;
 };
+
+export type ScreenerConfig = {
+  symbols: string[];
+  updated_at: string;
+};
+
+export type ScreenerStatus = {
+  pool_size: number;
+  cache_age_seconds?: number | null;
+  last_scan_at?: string | null;
+  last_duration_seconds?: number | null;
+  last_error_count: number;
+  symbols: string[];
+};

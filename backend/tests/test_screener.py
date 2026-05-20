@@ -66,3 +66,16 @@ def test_screener_scores_real_bars(monkeypatch) -> None:
     assert rebound[0].symbol == "000002"
     assert "距20日高点" in rebound[0].reason
     assert any(row.risk_status == "观察：流动性偏弱" for row in trend)
+
+
+def test_screener_config_persists_and_invalid_symbols_are_ignored(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("STOCK_TOOL_DB_PATH", str(tmp_path / "test.sqlite3"))
+    monkeypatch.setenv("SCREENER_SYMBOLS", "")
+    service = ScreenerService()
+
+    config = service.update_config([" 000001 ", "bad", "600519", "600519"])
+    fresh_service = ScreenerService()
+
+    assert config.symbols == ["000001", "600519"]
+    assert fresh_service.config().symbols == ["000001", "600519"]
+    assert fresh_service.status().pool_size == 2

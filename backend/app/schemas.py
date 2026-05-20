@@ -114,3 +114,21 @@ class ScreenerResult(BaseModel):
     reason: str
     risk_status: str
     generated_at: datetime
+
+
+class ScreenerConfig(BaseModel):
+    symbols: list[str]
+    updated_at: datetime
+
+
+class ScreenerConfigUpdate(BaseModel):
+    symbols: list[str]
+
+
+class ScreenerStatus(BaseModel):
+    pool_size: int
+    cache_age_seconds: int | None = None
+    last_scan_at: datetime | None = None
+    last_duration_seconds: float | None = None
+    last_error_count: int = 0
+    symbols: list[str]

@@ -175,6 +175,17 @@ button {
   font-weight: 700;
 }
 
+.primary-action {
+  border: 0;
+  border-radius: 6px;
+  padding: 9px 11px;
+  background: #1f4f8f;
+  color: #fff;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 800;
+}
+
 .stock-list {
   display: grid;
   gap: 8px;
@@ -651,6 +662,19 @@ td small {
   padding: 7px 8px;
   background: #fff;
   color: #405064;
+}
+
+.settings-card textarea {
+  width: 100%;
+  resize: vertical;
+  border: 1px solid #cbd7e6;
+  border-radius: 6px;
+  padding: 8px;
+  background: #fff;
+  color: #111827;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.6;
 }
 
 .settings-static {

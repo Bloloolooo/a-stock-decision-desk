@@ -58,6 +58,15 @@ def init_db() -> None:
         )
         connection.execute(
             """
+            CREATE TABLE IF NOT EXISTS screener_config (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                symbols TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            """
             INSERT OR IGNORE INTO account (id, cash, updated_at)
             VALUES (1, 92180.0, datetime('now'))
             """
@@ -68,5 +77,11 @@ def init_db() -> None:
             VALUES
                 ('300308', '中际旭创', 600, 151.55, '', datetime('now')),
                 ('300750', '宁德时代', 300, 205.44, '', datetime('now'))
+            """
+        )
+        connection.execute(
+            """
+            INSERT OR IGNORE INTO screener_config (id, symbols, updated_at)
+            VALUES (1, '', datetime('now'))
             """
         )

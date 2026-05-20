@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createChart, ColorType, type IChartApi, type UTCTimestamp } from "lightweight-charts";
 
 import { api } from "./api";
-import type { MarketPeriod, MarketStatus, PortfolioSummary, Position, PriceBar, RiskAdvice, ScreenerResult, TradeRecord } from "./types";
+import type { MarketPeriod, MarketStatus, PortfolioSummary, Position, PriceBar, RiskAdvice, ScreenerConfig, ScreenerResult, ScreenerStatus, TradeRecord } from "./types";
 
 const emptySummary: PortfolioSummary = {
   total_assets: 0,
@@ -48,6 +48,8 @@ export default function App() {
   const [risk, setRisk] = useState<RiskAdvice | null>(null);
   const [trend, setTrend] = useState<ScreenerResult[]>([]);
   const [rebound, setRebound] = useState<ScreenerResult[]>([]);
+  const [screenerConfig, setScreenerConfig] = useState<ScreenerConfig | null>(null);
+  const [screenerStatus, setScreenerStatus] = useState<ScreenerStatus | null>(null);
   const [marketStatus, setMarketStatus] = useState<MarketStatus | null>(null);
   const [periods, setPeriods] = useState<MarketPeriod[]>(defaultPeriods);
   const [autoRefreshSeconds, setAutoRefreshSeconds] = useState(10);
@@ -81,19 +83,48 @@ export default function App() {
       .catch(() => setStatus("行情刷新失败"));
   };
 
+  const reloadScreener = () => {
+    return Promise.all([api.screener("trend"), api.screener("rebound"), api.screenerStatus()])
+      .then(([trendData, reboundData, statusData]) => {
+        setTrend(trendData);
+        setRebound(reboundData);
+        setScreenerStatus(statusData);
+      });
+  };
+
+  const refreshScreener = () => {
+    setStatus("刷新选股雷达中");
+    return api.refreshScreener()
+      .then((statusData) => {
+        setScreenerStatus(statusData);
+        return reloadScreener();
+      })
+      .then(() => setStatus("选股雷达已更新"))
+      .catch(() => setStatus("选股雷达刷新失败"));
+  };
+
+  const saveScreenerSymbols = (symbols: string[]) => {
+    return api.updateScreenerConfig(symbols)
+      .then((configData) => {
+        setScreenerConfig(configData);
+        return refreshScreener();
+      });
+  };
+
   useEffect(() => {
-    Promise.all([api.summary(), api.positions(), api.trades(), api.screener("trend"), api.screener("rebound"), api.marketStatus(), api.marketPeriods()])
-      .then(([summaryData, positionData, tradeData, trendData, reboundData, marketStatusData, periodData]) => {
+    Promise.all([api.summary(), api.positions(), api.trades(), api.screenerConfig(), api.screenerStatus(), api.marketStatus(), api.marketPeriods()])
+      .then(([summaryData, positionData, tradeData, configData, statusData, marketStatusData, periodData]) => {
         setSummary(summaryData);
         setPositions(positionData);
         setTrades(tradeData);
-        setTrend(trendData);
-        setRebound(reboundData);
+        setScreenerConfig(configData);
+        setScreenerStatus(statusData);
         setMarketStatus(marketStatusData);
         setPeriods(periodData);
         setStatus(`${marketStatusData.description}已更新`);
       })
       .catch(() => setStatus("后端未连接，等待数据"));
+    reloadScreener().catch(() => undefined);
   }, []);
 
   useEffect(() => {
@@ -146,6 +177,8 @@ export default function App() {
         <ScreenerPage
           trend={trend}
           rebound={rebound}
+          status={screenerStatus}
+          onRefresh={refreshScreener}
           onOpen={(symbol) => {
             setSelectedSymbol(symbol);
             setTab("home");
@@ -158,6 +191,9 @@ export default function App() {
           marketStatus={marketStatus}
           autoRefreshSeconds={autoRefreshSeconds}
           onAutoRefreshSecondsChange={setAutoRefreshSeconds}
+          screenerConfig={screenerConfig}
+          screenerStatus={screenerStatus}
+          onSaveScreenerSymbols={saveScreenerSymbols}
         />
       )}
     </div>
@@ -495,12 +531,13 @@ function KLineChart({ bars, mode = "normal" }: { bars: PriceBar[]; mode?: "norma
   );
 }
 
-function ScreenerPage(props: { trend: ScreenerResult[]; rebound: ScreenerResult[]; onOpen: (symbol: string) => void }) {
+function ScreenerPage(props: { trend: ScreenerResult[]; rebound: ScreenerResult[]; status: ScreenerStatus | null; onRefresh: () => Promise<void>; onOpen: (symbol: string) => void }) {
   const allRows = [...props.trend, ...props.rebound];
   const generatedAt = allRows[0]?.generated_at ? new Date(allRows[0].generated_at).toLocaleString("zh-CN", { hour12: false }) : "--";
   const passCount = allRows.filter((row) => row.risk_status === "通过").length;
   const strongCount = props.trend.filter((row) => row.score >= 75).length;
   const reboundCount = props.rebound.filter((row) => row.score >= 70).length;
+  const cacheAge = props.status?.cache_age_seconds == null ? "--" : `${props.status.cache_age_seconds} 秒`;
   return (
     <main className="screener-grid">
       <aside className="panel filters">
@@ -510,7 +547,10 @@ function ScreenerPage(props: { trend: ScreenerResult[]; rebound: ScreenerResult[
         <Filter label="策略" value="趋势追强 + 超跌修复" />
         <Filter label="流动性" value="5日均额 > 3000 万" />
         <Filter label="风险过滤" value="开启" />
+        <Filter label="股票池" value={`${props.status?.pool_size ?? 0} 只`} />
+        <Filter label="缓存年龄" value={cacheAge} />
         <div className="filter-note">当前先扫描核心股票池，基于真实日 K 计算涨跌幅、均线、回撤、量能和风险状态。下一步可升级为盘后全 A 股缓存扫描。</div>
+        <button className="primary-action" onClick={props.onRefresh}>刷新扫描</button>
       </aside>
       <section className="screener-main">
         <div className="market-pulse">
@@ -610,7 +650,31 @@ function ReviewPage(props: { trades: TradeRecord[]; positions: Position[]; summa
   );
 }
 
-function SettingsPage(props: { marketStatus: MarketStatus | null; autoRefreshSeconds: number; onAutoRefreshSecondsChange: (seconds: number) => void }) {
+function SettingsPage(props: {
+  marketStatus: MarketStatus | null;
+  autoRefreshSeconds: number;
+  onAutoRefreshSecondsChange: (seconds: number) => void;
+  screenerConfig: ScreenerConfig | null;
+  screenerStatus: ScreenerStatus | null;
+  onSaveScreenerSymbols: (symbols: string[]) => Promise<void>;
+}) {
+  const [symbolsText, setSymbolsText] = useState((props.screenerConfig?.symbols ?? []).join(", "));
+  const [settingsStatus, setSettingsStatus] = useState("");
+
+  useEffect(() => {
+    setSymbolsText((props.screenerConfig?.symbols ?? []).join(", "));
+  }, [props.screenerConfig]);
+
+  const saveSymbols = async () => {
+    const symbols = symbolsText.split(/[\s,，]+/).map((symbol) => symbol.trim()).filter(Boolean);
+    try {
+      await props.onSaveScreenerSymbols(symbols);
+      setSettingsStatus("股票池已保存并刷新。");
+    } catch {
+      setSettingsStatus("保存失败，请检查股票代码。");
+    }
+  };
+
   return (
     <main className="settings-grid">
       <section className="panel settings-card">
@@ -638,8 +702,15 @@ function SettingsPage(props: { marketStatus: MarketStatus | null; autoRefreshSec
         </div>
       </section>
       <section className="panel settings-card">
-        <h2>策略版本</h2>
-        <p>当前策略以持仓风险、分数凯利、止损距离和现金占比为核心。选股雷达下一步会把趋势追强、超跌修复和行业强度接到真实行情池。</p>
+        <h2>选股雷达</h2>
+        <label>
+          扫描股票池
+          <textarea value={symbolsText} onChange={(event) => setSymbolsText(event.target.value)} rows={8} placeholder="300308, 300502, 601138" />
+        </label>
+        <button className="primary-action" onClick={saveSymbols}>保存并刷新</button>
+        <MiniStat label="当前股票池" value={`${props.screenerStatus?.pool_size ?? 0} 只`} />
+        <MiniStat label="最近耗时" value={props.screenerStatus?.last_duration_seconds == null ? "--" : `${props.screenerStatus.last_duration_seconds} 秒`} />
+        {settingsStatus && <p>{settingsStatus}</p>}
       </section>
     </main>
   );

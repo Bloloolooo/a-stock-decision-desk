@@ -1,8 +1,11 @@
 from dataclasses import dataclass
 from datetime import datetime
 import os
+from sqlite3 import Row
+import time
 
-from app.schemas import PriceBar, ScreenerResult
+from app.db import get_connection, init_db
+from app.schemas import PriceBar, ScreenerConfig, ScreenerResult, ScreenerStatus
 from app.services.market_data import market_data
 
 
@@ -55,7 +58,10 @@ def average(values: list[float]) -> float:
 
 class ScreenerService:
     def __init__(self) -> None:
+        init_db()
         self._cache: tuple[datetime, list[StockSignal]] | None = None
+        self._last_duration_seconds: float | None = None
+        self._last_error_count = 0
 
     def results(self, list_type: str) -> list[ScreenerResult]:
         normalized_type = "rebound" if list_type == "rebound" else "trend"
@@ -67,11 +73,49 @@ class ScreenerService:
         ]
         return sorted(scored, key=lambda row: row.score, reverse=True)[:8]
 
-    def _signals(self) -> list[StockSignal]:
-        if self._cache and (datetime.now() - self._cache[0]).total_seconds() < 300:
+    def refresh(self) -> ScreenerStatus:
+        self._signals(force=True)
+        return self.status()
+
+    def config(self) -> ScreenerConfig:
+        with get_connection() as connection:
+            row = connection.execute("SELECT symbols, updated_at FROM screener_config WHERE id = 1").fetchone()
+        return self._config_from_row(row)
+
+    def update_config(self, symbols: list[str]) -> ScreenerConfig:
+        normalized_symbols = self._normalize_symbols(symbols)
+        with get_connection() as connection:
+            connection.execute(
+                """
+                INSERT INTO screener_config (id, symbols, updated_at)
+                VALUES (1, ?, datetime('now'))
+                ON CONFLICT(id) DO UPDATE SET symbols = excluded.symbols, updated_at = excluded.updated_at
+                """,
+                (",".join(normalized_symbols),),
+            )
+        self._cache = None
+        return self.config()
+
+    def status(self) -> ScreenerStatus:
+        last_scan_at = self._cache[0] if self._cache else None
+        cache_age = int((datetime.now() - last_scan_at).total_seconds()) if last_scan_at else None
+        symbols = self._pool()
+        return ScreenerStatus(
+            pool_size=len(symbols),
+            cache_age_seconds=cache_age,
+            last_scan_at=last_scan_at,
+            last_duration_seconds=self._last_duration_seconds,
+            last_error_count=self._last_error_count,
+            symbols=symbols,
+        )
+
+    def _signals(self, force: bool = False) -> list[StockSignal]:
+        if not force and self._cache and (datetime.now() - self._cache[0]).total_seconds() < 300:
             return self._cache[1]
 
+        started_at = time.perf_counter()
         signals: list[StockSignal] = []
+        error_count = 0
         for symbol in self._pool():
             try:
                 bars = market_data.bars(symbol=symbol, period="daily")
@@ -79,15 +123,34 @@ class ScreenerService:
                 if signal:
                     signals.append(signal)
             except Exception:
+                error_count += 1
                 continue
         self._cache = (datetime.now(), signals)
+        self._last_duration_seconds = round(time.perf_counter() - started_at, 2)
+        self._last_error_count = error_count
         return signals
 
     def _pool(self) -> list[str]:
-        configured = os.getenv("SCREENER_SYMBOLS", "")
-        symbols = [item.strip() for item in configured.split(",") if item.strip()] or DEFAULT_POOL
+        config_symbols = self.config().symbols
+        env_symbols = self._normalize_symbols(os.getenv("SCREENER_SYMBOLS", "").split(","))
+        symbols = config_symbols or env_symbols or DEFAULT_POOL
+        return self._normalize_symbols(symbols)
+
+    def _normalize_symbols(self, symbols: list[str]) -> list[str]:
         seen: set[str] = set()
-        return [symbol for symbol in symbols if not (symbol in seen or seen.add(symbol))]
+        normalized: list[str] = []
+        for symbol in symbols:
+            cleaned = "".join(ch for ch in symbol.strip() if ch.isdigit())
+            if len(cleaned) == 6 and cleaned not in seen:
+                seen.add(cleaned)
+                normalized.append(cleaned)
+        return normalized
+
+    def _config_from_row(self, row: Row | None) -> ScreenerConfig:
+        if not row:
+            return ScreenerConfig(symbols=[], updated_at=datetime.now())
+        symbols = self._normalize_symbols(str(row["symbols"]).split(","))
+        return ScreenerConfig(symbols=symbols, updated_at=datetime.fromisoformat(row["updated_at"]))
 
     def _analyze(self, symbol: str, bars: list[PriceBar]) -> StockSignal | None:
         if len(bars) < 25:
