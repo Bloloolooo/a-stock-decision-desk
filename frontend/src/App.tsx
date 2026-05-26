@@ -618,7 +618,32 @@ function chartMacd(values: number[]) {
   }));
 }
 
+function chartKdj(bars: Array<{ high: number; low: number; close: number }>) {
+  let k = 50;
+  let d = 50;
+  return bars.map((bar, index) => {
+    const scoped = bars.slice(Math.max(0, index - 8), index + 1);
+    const low = Math.min(...scoped.map((item) => item.low));
+    const high = Math.max(...scoped.map((item) => item.high));
+    const rsv = high === low ? 50 : ((bar.close - low) / (high - low)) * 100;
+    k = (2 * k + rsv) / 3;
+    d = (2 * d + k) / 3;
+    return { k, d, j: 3 * k - 2 * d };
+  });
+}
+
+function chartVolumeRatio(volumes: number[]) {
+  return volumes.map((volume, index) => {
+    const scoped = volumes.slice(Math.max(0, index - 5), index);
+    const average = scoped.length ? scoped.reduce((sum, value) => sum + value, 0) / scoped.length : volume;
+    return average ? volume / average : 1;
+  });
+}
+
+type SubChartType = "volume" | "macd" | "kdj" | "ratio";
+
 function KLineChart({ bars, mode = "normal" }: { bars: PriceBar[]; mode?: "normal" | "fullscreen" }) {
+  const [subchart, setSubchart] = useState<SubChartType>("macd");
   const tooltipRef = useRef<HTMLDivElement | null>(null);
   const isMinuteChart = bars.some((bar) => bar.timestamp.includes(" "));
   const chartData = useMemo(
@@ -676,6 +701,51 @@ function KLineChart({ bars, mode = "normal" }: { bars: PriceBar[]; mode?: "norma
       })),
     };
   }, [chartData]);
+  const kdjData = useMemo(() => {
+    const points = chartKdj(chartData);
+    return {
+      k: points.map((point, index) => ({ time: chartData[index].time, value: point.k })),
+      d: points.map((point, index) => ({ time: chartData[index].time, value: point.d })),
+      j: points.map((point, index) => ({ time: chartData[index].time, value: point.j })),
+      latest: points[points.length - 1],
+    };
+  }, [chartData]);
+  const volumeRatioData = useMemo(() => {
+    const ratios = chartVolumeRatio(chartData.map((item) => item.volume));
+    return {
+      bars: ratios.map((ratio, index) => ({
+        time: chartData[index].time,
+        value: ratio,
+        color: ratio >= 1 ? "rgba(218, 63, 55, 0.7)" : "rgba(22, 137, 98, 0.7)",
+      })),
+      line: ratios.map((ratio, index) => ({ time: chartData[index].time, value: ratio })),
+      latest: ratios[ratios.length - 1],
+    };
+  }, [chartData]);
+  const latestMacd = macdData.histogram.length
+    ? {
+      dif: macdData.dif[macdData.dif.length - 1].value,
+      dea: macdData.dea[macdData.dea.length - 1].value,
+      histogram: macdData.histogram[macdData.histogram.length - 1].value,
+    }
+    : null;
+  const latestVolume = volumeData[volumeData.length - 1]?.value ?? 0;
+  const subchartReadout = {
+    volume: `成交量 ${latestVolume.toLocaleString("zh-CN", { maximumFractionDigits: 0 })}`,
+    macd: latestMacd
+      ? `DIF ${latestMacd.dif.toFixed(3)}  DEA ${latestMacd.dea.toFixed(3)}  MACD ${latestMacd.histogram.toFixed(3)}`
+      : "MACD 暂无",
+    kdj: kdjData.latest
+      ? `K ${kdjData.latest.k.toFixed(1)}  D ${kdjData.latest.d.toFixed(1)}  J ${kdjData.latest.j.toFixed(1)}`
+      : "KDJ 暂无",
+    ratio: `量比 ${(volumeRatioData.latest ?? 1).toFixed(2)}`,
+  } satisfies Record<SubChartType, string>;
+  const subchartTabs: Array<{ key: SubChartType; label: string }> = [
+    { key: "volume", label: "成交量" },
+    { key: "macd", label: "MACD" },
+    { key: "kdj", label: "KDJ" },
+    { key: "ratio", label: "量比" },
+  ];
 
   return (
     <div className="pro-chart" data-mode={mode}>
@@ -692,7 +762,7 @@ function KLineChart({ bars, mode = "normal" }: { bars: PriceBar[]; mode?: "norma
         ) : <span>暂无行情</span>}
       </div>
       <div
-        className="chart-canvas"
+        className="chart-main-canvas"
         data-mode={mode}
         ref={(container) => {
           if (!container || chartData.length === 0) return;
@@ -700,7 +770,7 @@ function KLineChart({ bars, mode = "normal" }: { bars: PriceBar[]; mode?: "norma
           const chart: IChartApi = createChart(container, {
             layout: { background: { type: ColorType.Solid, color: "#0f1724" }, textColor: "#9aa8bd" },
             grid: { vertLines: { color: "#1c2940" }, horzLines: { color: "#1c2940" } },
-            rightPriceScale: { borderColor: "#253145", scaleMargins: { top: 0.06, bottom: 0.36 } },
+            rightPriceScale: { borderColor: "#253145", scaleMargins: { top: 0.06, bottom: 0.08 } },
             timeScale: { borderColor: "#253145", timeVisible: true, secondsVisible: false },
             crosshair: { mode: 1, vertLine: { color: "#50647f", style: LineStyle.Dashed }, horzLine: { color: "#50647f", style: LineStyle.Dashed } },
             width: container.clientWidth,
@@ -728,27 +798,6 @@ function KLineChart({ bars, mode = "normal" }: { bars: PriceBar[]; mode?: "norma
               series.setData(ma.data);
             });
           }
-          const volumeSeries = chart.addHistogramSeries({
-            priceFormat: { type: "volume" },
-            priceScaleId: "volume",
-            lastValueVisible: false,
-            priceLineVisible: false,
-          });
-          chart.priceScale("volume").applyOptions({ scaleMargins: { top: 0.68, bottom: 0.18 } });
-          volumeSeries.setData(volumeData);
-          if (!isMinuteChart) {
-            const macdHistogram = chart.addHistogramSeries({
-              priceScaleId: "macd",
-              lastValueVisible: false,
-              priceLineVisible: false,
-            });
-            chart.priceScale("macd").applyOptions({ scaleMargins: { top: 0.84, bottom: 0.02 } });
-            macdHistogram.setData(macdData.histogram);
-            const difSeries = chart.addLineSeries({ color: "#4ea4ff", lineWidth: 1, priceScaleId: "macd", lastValueVisible: false, priceLineVisible: false });
-            const deaSeries = chart.addLineSeries({ color: "#f0b84f", lineWidth: 1, priceScaleId: "macd", lastValueVisible: false, priceLineVisible: false });
-            difSeries.setData(macdData.dif);
-            deaSeries.setData(macdData.dea);
-          }
           chart.subscribeCrosshairMove((param) => {
             const tooltip = tooltipRef.current;
             if (!tooltip || !param.time) return;
@@ -768,12 +817,75 @@ function KLineChart({ bars, mode = "normal" }: { bars: PriceBar[]; mode?: "norma
           chart.timeScale().fitContent();
         }}
       />
+      <div className="subchart-tabs" role="tablist" aria-label="副图指标">
+        {subchartTabs.map((item) => (
+          <button
+            key={item.key}
+            className={subchart === item.key ? "active" : ""}
+            type="button"
+            onClick={() => setSubchart(item.key)}
+          >
+            {item.label}
+          </button>
+        ))}
+        <span className="subchart-readout">{subchartReadout[subchart]}</span>
+      </div>
+      <div
+        className="chart-sub-canvas"
+        data-mode={mode}
+        ref={(container) => {
+          if (!container || chartData.length === 0) return;
+          container.replaceChildren();
+          const chart: IChartApi = createChart(container, {
+            layout: { background: { type: ColorType.Solid, color: "#101a2a" }, textColor: "#9aa8bd" },
+            grid: { vertLines: { color: "#1c2940" }, horzLines: { color: "#1c2940" } },
+            rightPriceScale: { borderColor: "#253145", scaleMargins: { top: 0.14, bottom: 0.12 } },
+            timeScale: { borderColor: "#253145", timeVisible: true, secondsVisible: false },
+            crosshair: { mode: 1, vertLine: { color: "#50647f", style: LineStyle.Dashed }, horzLine: { color: "#50647f", style: LineStyle.Dashed } },
+            width: container.clientWidth,
+            height: container.clientHeight,
+          });
+          if (subchart === "volume") {
+            const series = chart.addHistogramSeries({
+              priceFormat: { type: "volume" },
+              lastValueVisible: true,
+              priceLineVisible: false,
+            });
+            series.setData(volumeData);
+          }
+          if (subchart === "macd") {
+            const histogram = chart.addHistogramSeries({
+              lastValueVisible: false,
+              priceLineVisible: false,
+            });
+            histogram.setData(macdData.histogram);
+            const difSeries = chart.addLineSeries({ color: "#4ea4ff", lineWidth: 2, priceLineVisible: false });
+            const deaSeries = chart.addLineSeries({ color: "#f0b84f", lineWidth: 2, priceLineVisible: false });
+            difSeries.setData(macdData.dif);
+            deaSeries.setData(macdData.dea);
+          }
+          if (subchart === "kdj") {
+            const kSeries = chart.addLineSeries({ color: "#4ea4ff", lineWidth: 2, priceLineVisible: false });
+            const dSeries = chart.addLineSeries({ color: "#f0b84f", lineWidth: 2, priceLineVisible: false });
+            const jSeries = chart.addLineSeries({ color: "#d879ff", lineWidth: 2, priceLineVisible: false });
+            kSeries.setData(kdjData.k);
+            dSeries.setData(kdjData.d);
+            jSeries.setData(kdjData.j);
+          }
+          if (subchart === "ratio") {
+            const histogram = chart.addHistogramSeries({ lastValueVisible: false, priceLineVisible: false });
+            histogram.setData(volumeRatioData.bars);
+            const line = chart.addLineSeries({ color: "#f0c04f", lineWidth: 2, priceLineVisible: false });
+            line.setData(volumeRatioData.line);
+          }
+          chart.timeScale().fitContent();
+        }}
+      />
       <div className="chart-legend">
         {isMinuteChart ? (
           <>
             <span><i style={{ background: "#69a8ff" }} />分时</span>
             <span><i style={{ background: "#f0c04f" }} />VWAP</span>
-            <span><i style={{ background: "#d94b42" }} />成交量</span>
           </>
         ) : (
           <>
@@ -781,11 +893,24 @@ function KLineChart({ bars, mode = "normal" }: { bars: PriceBar[]; mode?: "norma
             <span><i style={{ background: "#8ecae6" }} />MA10</span>
             <span><i style={{ background: "#c084fc" }} />MA20</span>
             <span><i style={{ background: "#f59e0b" }} />MA60</span>
-            <span><i style={{ background: "#d94b42" }} />VOL</span>
-            <span><i style={{ background: "#4ea4ff" }} />DIF</span>
-            <span><i style={{ background: "#f0b84f" }} />DEA</span>
           </>
         )}
+        {subchart === "volume" && <span><i style={{ background: "#d94b42" }} />成交量</span>}
+        {subchart === "macd" && (
+          <>
+            <span><i style={{ background: "#4ea4ff" }} />DIF</span>
+            <span><i style={{ background: "#f0b84f" }} />DEA</span>
+            <span><i style={{ background: "#d94b42" }} />MACD</span>
+          </>
+        )}
+        {subchart === "kdj" && (
+          <>
+            <span><i style={{ background: "#4ea4ff" }} />K</span>
+            <span><i style={{ background: "#f0b84f" }} />D</span>
+            <span><i style={{ background: "#d879ff" }} />J</span>
+          </>
+        )}
+        {subchart === "ratio" && <span><i style={{ background: "#f0c04f" }} />量比</span>}
       </div>
     </div>
   );
