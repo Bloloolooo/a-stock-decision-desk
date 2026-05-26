@@ -1008,7 +1008,7 @@ function KLineChart({ bars, mode = "normal" }: { bars: PriceBar[]; mode?: "norma
           const chart: IChartApi = createChart(container, {
             layout: { background: { type: ColorType.Solid, color: "#0f1724" }, textColor: "#9aa8bd" },
             grid: { vertLines: { color: "#1c2940" }, horzLines: { color: "#1c2940" } },
-            rightPriceScale: { borderColor: "#253145", scaleMargins: { top: 0.06, bottom: 0.08 } },
+            rightPriceScale: { borderColor: "#253145", minimumWidth: 72, scaleMargins: { top: 0.06, bottom: 0.08 } },
             timeScale: { borderColor: "#253145", timeVisible: true, secondsVisible: false },
             crosshair: { mode: 1, vertLine: { color: "#50647f", style: LineStyle.Dashed }, horzLine: { color: "#50647f", style: LineStyle.Dashed } },
             width: container.clientWidth,
@@ -1092,7 +1092,7 @@ function KLineChart({ bars, mode = "normal" }: { bars: PriceBar[]; mode?: "norma
           const chart: IChartApi = createChart(container, {
             layout: { background: { type: ColorType.Solid, color: "#101a2a" }, textColor: "#9aa8bd" },
             grid: { vertLines: { color: "#1c2940" }, horzLines: { color: "#1c2940" } },
-            rightPriceScale: { borderColor: "#253145", scaleMargins: { top: 0.14, bottom: 0.12 } },
+            rightPriceScale: { borderColor: "#253145", minimumWidth: 72, scaleMargins: { top: 0.14, bottom: 0.12 } },
             timeScale: { borderColor: "#253145", timeVisible: true, secondsVisible: false },
             crosshair: { mode: 1, vertLine: { color: "#50647f", style: LineStyle.Dashed }, horzLine: { color: "#50647f", style: LineStyle.Dashed } },
             width: container.clientWidth,
