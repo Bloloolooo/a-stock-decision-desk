@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 class PositionCreate(BaseModel):
     symbol: str
     name: str = ""
-    quantity: int = Field(ge=0)
+    quantity: int = Field(gt=0)
     average_cost: float = Field(gt=0)
     note: str = ""
 

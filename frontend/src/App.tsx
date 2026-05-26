@@ -318,6 +318,7 @@ function HomePage(props: {
     quantity: "",
     average_cost: "",
   });
+  const [quoteSymbol, setQuoteSymbol] = useState(props.selectedSymbol);
   const [sellForm, setSellForm] = useState({
     symbol: props.selectedSymbol,
     quantity: "",
@@ -332,6 +333,7 @@ function HomePage(props: {
 
   useEffect(() => {
     setSellForm((current) => ({ ...current, symbol: props.selectedSymbol }));
+    setQuoteSymbol(props.selectedSymbol);
   }, [props.selectedSymbol]);
 
   useEffect(() => {
@@ -358,33 +360,56 @@ function HomePage(props: {
 
   const savePosition = async () => {
     try {
+      const symbol = positionForm.symbol.replace(/\D/g, "");
+      const quantity = Number(positionForm.quantity);
+      const averageCost = Number(positionForm.average_cost);
+      if (symbol.length !== 6 || !Number.isInteger(quantity) || quantity <= 0 || !Number.isFinite(averageCost) || averageCost <= 0) {
+        setFormStatus("买入信息有误，请输入 6 位代码、正整数数量和大于 0 的买入均价。");
+        return;
+      }
       await api.upsertPosition({
-        symbol: positionForm.symbol.trim(),
-        quantity: Number(positionForm.quantity),
-        average_cost: Number(positionForm.average_cost),
+        symbol,
+        quantity,
+        average_cost: averageCost,
       });
       await props.onPortfolioChange();
-      props.onSelectSymbol(positionForm.symbol.trim());
+      props.onSelectSymbol(symbol);
       setPositionForm({ symbol: "", quantity: "", average_cost: "" });
-      setFormStatus("持仓已保存");
-    } catch {
-      setFormStatus("保存失败，请检查代码、数量和后端连接。");
+      setFormStatus("买入已记录，现金和持仓已更新");
+    } catch (error) {
+      setFormStatus(error instanceof Error ? error.message : "买入失败，请检查代码、数量和后端连接。");
     }
   };
 
   const sellPosition = async () => {
     try {
+      const symbol = sellForm.symbol.replace(/\D/g, "");
+      const quantity = Number(sellForm.quantity);
+      const sellPrice = Number(sellForm.sell_price);
+      if (symbol.length !== 6 || !Number.isInteger(quantity) || quantity <= 0 || !Number.isFinite(sellPrice) || sellPrice <= 0) {
+        setFormStatus("卖出信息有误，请输入 6 位代码、正整数数量和大于 0 的卖出价格。");
+        return;
+      }
       await api.sellPosition({
-        symbol: sellForm.symbol.trim(),
-        quantity: Number(sellForm.quantity),
-        sell_price: Number(sellForm.sell_price),
+        symbol,
+        quantity,
+        sell_price: sellPrice,
       });
       await props.onPortfolioChange();
       setSellForm({ symbol: props.selectedSymbol, quantity: "", sell_price: "" });
       setFormStatus("卖出已记录");
-    } catch {
-      setFormStatus("卖出失败，请检查持仓数量和后端连接。");
+    } catch (error) {
+      setFormStatus(error instanceof Error ? error.message : "卖出失败，请检查持仓数量和后端连接。");
     }
+  };
+
+  const openQuoteSymbol = () => {
+    const symbol = quoteSymbol.replace(/\D/g, "");
+    if (symbol.length !== 6) {
+      setFormStatus("请输入 6 位股票代码后查看 K 线。");
+      return;
+    }
+    props.onSelectSymbol(symbol);
   };
 
   return (
@@ -427,7 +452,7 @@ function HomePage(props: {
               <input value={cashValue} onChange={(event) => setCashValue(event.target.value)} inputMode="decimal" />
             </label>
             <button onClick={saveCash}>保存现金</button>
-            <h3>持仓录入</h3>
+            <h3>买入记录</h3>
             <label>
               代码
               <input ref={symbolInputRef} value={positionForm.symbol} onChange={(event) => setPositionForm({ ...positionForm, symbol: event.target.value })} placeholder="300308" />
@@ -441,9 +466,9 @@ function HomePage(props: {
               <input value={positionForm.average_cost} onChange={(event) => setPositionForm({ ...positionForm, average_cost: event.target.value })} inputMode="decimal" />
             </label>
             <button onClick={savePosition} disabled={!positionForm.symbol || !positionForm.quantity || !positionForm.average_cost}>
-              保存持仓
+              记录买入
             </button>
-            <span className="entry-hint">名称会根据代码自动匹配。</span>
+            <span className="entry-hint">名称会根据代码自动匹配；买入会扣减现金并重算持仓均价。</span>
             {formStatus && <p>{formStatus}</p>}
             <h3>卖出记录</h3>
             <label>
@@ -472,6 +497,20 @@ function HomePage(props: {
               <p>现价 {props.risk?.current_price.toFixed(2) ?? "--"} · 成本 {selectedPosition?.average_cost.toFixed(2) ?? "--"} · 数据源 {props.marketStatus?.description ?? "--"}</p>
             </div>
             <div className="chart-actions">
+              <div className="quote-search">
+                <input
+                  value={quoteSymbol}
+                  onChange={(event) => setQuoteSymbol(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      openQuoteSymbol();
+                    }
+                  }}
+                  placeholder="输入代码看K线"
+                  inputMode="numeric"
+                />
+                <button className="refresh-button" onClick={openQuoteSymbol}>查看K线</button>
+              </div>
               <div className="periods">
                 {props.periods.map((item) => (
                   <button key={item.key} className={props.period === item.key ? "active" : ""} disabled={!item.available} onClick={() => props.onPeriodChange(item.key)}>
@@ -1188,7 +1227,7 @@ function ResultList(props: { title: string; subtitle: string; rows: ScreenerResu
                 <td className={row.change_pct >= 0 ? "up" : "down"}>{row.change_pct >= 0 ? "+" : ""}{row.change_pct.toFixed(2)}%</td>
                 <td>{row.reason}</td>
                 <td>{row.risk_status}</td>
-                <td><button className="link-button" onClick={() => props.onOpen(row.symbol)}>看走势</button></td>
+                <td><button className="link-button" onClick={() => props.onOpen(row.symbol)}>主页看K线</button></td>
               </tr>
               {showFactors && (
                 <tr className="factor-row">

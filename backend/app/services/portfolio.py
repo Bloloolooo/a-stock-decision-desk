@@ -22,14 +22,35 @@ class PortfolioService:
             )
 
     def upsert_position(self, payload: PositionCreate) -> Position:
+        symbol = payload.symbol.strip()
         normalized_payload = PositionCreate(
             **{
                 **payload.model_dump(),
-                "symbol": payload.symbol.strip(),
-                "name": payload.name.strip() or market_data.name(payload.symbol.strip()),
+                "symbol": symbol,
+                "name": payload.name.strip() or market_data.name(symbol),
             }
         )
+        buy_amount = normalized_payload.quantity * normalized_payload.average_cost
         with get_connection() as connection:
+            cash = self._cash()
+            if buy_amount > cash:
+                raise ValueError(f"可用现金不足，买入需 {buy_amount:.2f}，当前现金 {cash:.2f}")
+            row = connection.execute(
+                "SELECT symbol, name, quantity, average_cost, note FROM positions WHERE symbol = ?",
+                (normalized_payload.symbol,),
+            ).fetchone()
+            if row:
+                current_quantity = int(row["quantity"])
+                new_quantity = current_quantity + normalized_payload.quantity
+                cost_value = current_quantity * float(row["average_cost"]) + buy_amount
+                average_cost = cost_value / new_quantity if new_quantity else normalized_payload.average_cost
+                name = row["name"] or normalized_payload.name
+                note = normalized_payload.note or row["note"]
+            else:
+                new_quantity = normalized_payload.quantity
+                average_cost = normalized_payload.average_cost
+                name = normalized_payload.name
+                note = normalized_payload.note
             connection.execute(
                 """
                 INSERT INTO positions (symbol, name, quantity, average_cost, note, updated_at)
@@ -43,11 +64,19 @@ class PortfolioService:
                 """,
                 (
                     normalized_payload.symbol,
-                    normalized_payload.name,
-                    normalized_payload.quantity,
-                    normalized_payload.average_cost,
-                    normalized_payload.note,
+                    name,
+                    new_quantity,
+                    average_cost,
+                    note,
                 ),
+            )
+            connection.execute(
+                """
+                UPDATE account
+                SET cash = cash - ?, updated_at = datetime('now')
+                WHERE id = 1
+                """,
+                (buy_amount,),
             )
             connection.execute(
                 """
@@ -56,14 +85,22 @@ class PortfolioService:
                 """,
                 (
                     normalized_payload.symbol,
-                    normalized_payload.name,
+                    name,
                     normalized_payload.quantity,
                     normalized_payload.average_cost,
-                    normalized_payload.quantity * normalized_payload.average_cost,
+                    buy_amount,
                     normalized_payload.note,
                 ),
             )
-        return self._position_view(normalized_payload)
+        return self._position_view(
+            PositionCreate(
+                symbol=normalized_payload.symbol,
+                name=name,
+                quantity=new_quantity,
+                average_cost=average_cost,
+                note=note,
+            )
+        )
 
     def sell_position(self, payload: PositionSell) -> None:
         symbol = payload.symbol.strip()

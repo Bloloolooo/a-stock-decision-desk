@@ -355,6 +355,22 @@ td small {
   gap: 8px;
 }
 
+.quote-search {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.quote-search input {
+  width: 126px;
+  border: 1px solid #cbd7e6;
+  border-radius: 5px;
+  padding: 6px 8px;
+  background: #fff;
+  color: #263445;
+  font-size: 12px;
+}
+
 .refresh-controls {
   display: flex;
   gap: 6px;

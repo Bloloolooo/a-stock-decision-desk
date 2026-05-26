@@ -2,10 +2,20 @@ import type { DecisionCenter, MarketPeriod, MarketSettings, MarketStatus, Portfo
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? "http://localhost:8000/api";
 
+async function requestError(response: Response) {
+  try {
+    const payload = await response.json();
+    const detail = typeof payload.detail === "string" ? payload.detail : JSON.stringify(payload.detail ?? payload);
+    return new Error(detail || `API request failed: ${response.status}`);
+  } catch {
+    return new Error(`API request failed: ${response.status}`);
+  }
+}
+
 async function getJson<T>(path: string): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`);
   if (!response.ok) {
-    throw new Error(`API request failed: ${response.status}`);
+    throw await requestError(response);
   }
   return response.json();
 }
@@ -17,7 +27,7 @@ async function postJson<T>(path: string, payload: unknown): Promise<T> {
     body: JSON.stringify(payload),
   });
   if (!response.ok) {
-    throw new Error(`API request failed: ${response.status}`);
+    throw await requestError(response);
   }
   return response.json();
 }
@@ -29,7 +39,7 @@ async function putJson<T>(path: string, payload: unknown): Promise<T> {
     body: JSON.stringify(payload),
   });
   if (!response.ok) {
-    throw new Error(`API request failed: ${response.status}`);
+    throw await requestError(response);
   }
   return response.json();
 }

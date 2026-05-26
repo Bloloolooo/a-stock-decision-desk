@@ -29,7 +29,10 @@ def get_trade_records(limit: int = 100) -> list[TradeRecord]:
 
 @router.post("/positions", response_model=Position)
 def upsert_position(payload: PositionCreate) -> Position:
-    return portfolio_service.upsert_position(payload)
+    try:
+        return portfolio_service.upsert_position(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("/sell", response_model=PortfolioSummary)
