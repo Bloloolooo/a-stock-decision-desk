@@ -1093,6 +1093,9 @@ function SettingsPage(props: {
             <option value="akshare">AkShare</option>
             <option value="sina">Sina</option>
             <option value="tushare">Tushare</option>
+            <option value="efinance">efinance</option>
+            <option value="baostock">BaoStock</option>
+            <option value="tencent">Tencent</option>
             <option value="sample">示例数据</option>
           </select>
         </label>

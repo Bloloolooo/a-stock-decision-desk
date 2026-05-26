@@ -21,3 +21,12 @@ def test_market_settings_reject_unknown_provider(monkeypatch, tmp_path) -> None:
     settings = manager.update_settings(provider="unknown")
 
     assert settings.provider == "auto"
+
+
+def test_market_settings_accepts_extra_free_providers(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("STOCK_TOOL_DB_PATH", str(tmp_path / "test.sqlite3"))
+    manager = MarketDataManager()
+
+    for provider in ["efinance", "baostock", "tencent"]:
+        settings = manager.update_settings(provider=provider)
+        assert settings.provider == provider

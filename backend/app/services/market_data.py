@@ -430,8 +430,10 @@ class TushareMarketDataProvider(AkShareMarketDataProvider):
             self._bars_cache[cache_key] = (datetime.now(), bars)
             return bars
         except Exception as exc:
-            self.last_error = f"Tushare 失败：{exc}"
-            return super().bars(symbol=symbol, period=period, adjust=adjust)
+            error = f"Tushare 失败：{exc}"
+            bars = super().bars(symbol=symbol, period=period, adjust=adjust)
+            self.last_error = f"{error}；已使用 {self.last_source} 备用源"
+            return bars
 
     def _aggregate_bars(self, bars: list[PriceBar], period: str, adjust: str) -> list[PriceBar]:
         grouped: dict[str, list[PriceBar]] = {}
@@ -468,6 +470,222 @@ class TushareMarketDataProvider(AkShareMarketDataProvider):
         return result
 
 
+class EfinanceMarketDataProvider(AkShareMarketDataProvider):
+    provider_name = "efinance"
+    description = "efinance 免费公开行情"
+
+    period_map = {
+        "daily": 101,
+        "weekly": 102,
+        "monthly": 103,
+    }
+
+    def bars(self, symbol: str, period: str = "daily", adjust: str = "qfq") -> list[PriceBar]:
+        if period not in self.period_map:
+            self.last_error = "efinance 分时接口暂未接入，已回退 AkShare/Sina"
+            return super().bars(symbol=symbol, period=period, adjust=adjust)
+        cache_key = (symbol, period, adjust)
+        cached = self._bars_cache.get(cache_key)
+        if cached and (datetime.now() - cached[0]).total_seconds() < 60:
+            self.last_source = "efinance"
+            self.last_error = None
+            return cached[1]
+        try:
+            import efinance as ef
+
+            frame = ef.stock.get_quote_history(stock_code=symbol, klt=self.period_map[period], fqt=1 if adjust == "qfq" else 0)
+            if frame.empty:
+                raise RuntimeError("efinance 返回空行情")
+            frame = frame.tail(180)
+            now = datetime.now()
+            bars: list[PriceBar] = []
+            for row in frame.to_dict("records"):
+                trade_date = datetime.strptime(str(row["日期"])[:10], "%Y-%m-%d").date()
+                bars.append(
+                    PriceBar(
+                        symbol=symbol,
+                        period=period,
+                        trade_date=trade_date,
+                        timestamp=trade_date.isoformat(),
+                        open=float(row["开盘"]),
+                        high=float(row["最高"]),
+                        low=float(row["最低"]),
+                        close=float(row["收盘"]),
+                        volume=float(row.get("成交量", 0)),
+                        amount=float(row.get("成交额", 0)),
+                        turnover_rate=float(row["换手率"]) if row.get("换手率") not in (None, "") else None,
+                        adjust=adjust,
+                        updated_at=now,
+                    )
+                )
+            self.last_source = "efinance"
+            self.last_error = None
+            self._bars_cache[cache_key] = (datetime.now(), bars)
+            return bars
+        except Exception as exc:
+            error = f"efinance 失败：{exc}"
+            bars = super().bars(symbol=symbol, period=period, adjust=adjust)
+            self.last_error = f"{error}；已使用 {self.last_source} 备用源"
+            return bars
+
+
+class BaoStockMarketDataProvider(AkShareMarketDataProvider):
+    provider_name = "baostock"
+    description = "BaoStock 免费 A 股历史行情"
+
+    period_map = {
+        "daily": "d",
+        "weekly": "w",
+        "monthly": "m",
+    }
+
+    def bars(self, symbol: str, period: str = "daily", adjust: str = "qfq") -> list[PriceBar]:
+        if period not in self.period_map:
+            self.last_error = "BaoStock 分时接口暂未接入，已回退 AkShare/Sina"
+            return super().bars(symbol=symbol, period=period, adjust=adjust)
+        cache_key = (symbol, period, adjust)
+        cached = self._bars_cache.get(cache_key)
+        if cached and (datetime.now() - cached[0]).total_seconds() < 60:
+            self.last_source = "baostock"
+            self.last_error = None
+            return cached[1]
+        try:
+            import baostock as bs
+
+            login = bs.login()
+            if login.error_code != "0":
+                raise RuntimeError(login.error_msg)
+            try:
+                code = f"sh.{symbol}" if symbol.startswith("6") else f"sz.{symbol}"
+                start_date = (date.today() - timedelta(days=420)).isoformat()
+                result = bs.query_history_k_data_plus(
+                    code,
+                    "date,code,open,high,low,close,volume,amount,turn",
+                    start_date=start_date,
+                    end_date=date.today().isoformat(),
+                    frequency=self.period_map[period],
+                    adjustflag="2" if adjust == "qfq" else "3" if adjust == "hfq" else "1",
+                )
+                rows = []
+                while result.error_code == "0" and result.next():
+                    rows.append(result.get_row_data())
+                if result.error_code != "0":
+                    raise RuntimeError(result.error_msg)
+            finally:
+                bs.logout()
+            if not rows:
+                raise RuntimeError("BaoStock 返回空行情")
+            now = datetime.now()
+            bars: list[PriceBar] = []
+            for row in rows[-180:]:
+                trade_date = datetime.strptime(row[0], "%Y-%m-%d").date()
+                close = float(row[5])
+                volume = float(row[6] or 0)
+                bars.append(
+                    PriceBar(
+                        symbol=symbol,
+                        period=period,
+                        trade_date=trade_date,
+                        timestamp=trade_date.isoformat(),
+                        open=float(row[2]),
+                        high=float(row[3]),
+                        low=float(row[4]),
+                        close=close,
+                        volume=volume,
+                        amount=float(row[7] or 0),
+                        turnover_rate=float(row[8]) if row[8] not in (None, "") else None,
+                        adjust=adjust,
+                        updated_at=now,
+                    )
+                )
+            self.last_source = "baostock"
+            self.last_error = None
+            self._bars_cache[cache_key] = (datetime.now(), bars)
+            return bars
+        except Exception as exc:
+            error = f"BaoStock 失败：{exc}"
+            bars = super().bars(symbol=symbol, period=period, adjust=adjust)
+            self.last_error = f"{error}；已使用 {self.last_source} 备用源"
+            return bars
+
+
+class TencentMarketDataProvider(AkShareMarketDataProvider):
+    provider_name = "tencent"
+    description = "Tencent Finance 公开 HTTP 行情"
+
+    period_map = {
+        "daily": "day",
+        "weekly": "week",
+        "monthly": "month",
+    }
+
+    def bars(self, symbol: str, period: str = "daily", adjust: str = "qfq") -> list[PriceBar]:
+        if period not in self.period_map:
+            self.last_error = "Tencent 分时接口暂未接入，已回退 Sina"
+            return self._fetch_sina_or_sample(symbol=symbol, period=period, adjust=adjust)
+        cache_key = (symbol, period, adjust)
+        cached = self._bars_cache.get(cache_key)
+        if cached and (datetime.now() - cached[0]).total_seconds() < 60:
+            self.last_source = "tencent"
+            self.last_error = None
+            return cached[1]
+        try:
+            market_symbol = self._sina_symbol(symbol)
+            period_key = self.period_map[period]
+            adjust_key = "qfq" if adjust == "qfq" else "hfq" if adjust == "hfq" else ""
+            url = (
+                "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get"
+                f"?param={market_symbol},{period_key},,,180,{adjust_key}"
+            )
+            request = Request(url, headers={"User-Agent": "Mozilla/5.0", "Referer": "https://gu.qq.com/"})
+            with urlopen(request, timeout=10) as response:
+                payload = json.loads(response.read().decode("utf-8", errors="ignore"))
+            data = payload.get("data", {}).get(market_symbol, {})
+            rows = data.get(f"{adjust_key}{period_key}") or data.get(period_key) or data.get("qfqday") or data.get("day") or []
+            if not rows:
+                raise RuntimeError("Tencent 返回空行情")
+            now = datetime.now()
+            bars: list[PriceBar] = []
+            for row in rows[-180:]:
+                trade_date = datetime.strptime(str(row[0])[:10], "%Y-%m-%d").date()
+                close = float(row[2])
+                volume = float(row[5]) if len(row) > 5 else 0.0
+                bars.append(
+                    PriceBar(
+                        symbol=symbol,
+                        period=period,
+                        trade_date=trade_date,
+                        timestamp=trade_date.isoformat(),
+                        open=float(row[1]),
+                        high=float(row[3]),
+                        low=float(row[4]),
+                        close=close,
+                        volume=volume,
+                        amount=round(volume * close, 2),
+                        turnover_rate=None,
+                        adjust=adjust,
+                        updated_at=now,
+                    )
+                )
+            self.last_source = "tencent"
+            self.last_error = None
+            self._bars_cache[cache_key] = (datetime.now(), bars)
+            return bars
+        except Exception as exc:
+            self.last_error = f"Tencent 失败：{exc}"
+            return self._fetch_sina_or_sample(symbol=symbol, period=period, adjust=adjust)
+
+    def _fetch_sina_or_sample(self, symbol: str, period: str, adjust: str) -> list[PriceBar]:
+        try:
+            bars = self._fetch_sina_bars(symbol=symbol, period=period, adjust=adjust)
+            self.last_source = "sina"
+            return bars
+        except Exception as exc:
+            self.last_source = "sample"
+            self.last_error = f"{self.last_error}; Sina 失败：{exc}"
+            return self.fallback.bars(symbol=symbol, period=period, adjust=adjust)
+
+
 class MarketDataManager:
     provider_name = "auto"
     description = "自动选择真实行情源"
@@ -479,6 +697,9 @@ class MarketDataManager:
         self.sample = SampleMarketDataProvider()
         self.akshare = AkShareMarketDataProvider(fallback=self.sample)
         self.sina = SinaMarketDataProvider(fallback=self.sample)
+        self.efinance = EfinanceMarketDataProvider(fallback=self.sample)
+        self.baostock = BaoStockMarketDataProvider(fallback=self.sample)
+        self.tencent = TencentMarketDataProvider(fallback=self.sample)
         self._tushare_token = ""
         self.tushare = TushareMarketDataProvider(token="", fallback=self.sample)
 
@@ -500,7 +721,7 @@ class MarketDataManager:
         )
 
     def update_settings(self, provider: str, tushare_token: str = "") -> MarketSettings:
-        normalized = provider if provider in {"auto", "akshare", "sina", "tushare", "sample"} else "auto"
+        normalized = provider if provider in {"auto", "akshare", "sina", "tushare", "efinance", "baostock", "tencent", "sample"} else "auto"
         current_token = self._stored_tushare_token()
         token = tushare_token.strip() or current_token
         with get_connection() as connection:
@@ -539,6 +760,12 @@ class MarketDataManager:
             return self.sample
         if configured == "sina":
             return self.sina
+        if configured == "efinance":
+            return self.efinance
+        if configured == "baostock":
+            return self.baostock
+        if configured == "tencent":
+            return self.tencent
         if configured == "tushare":
             token = self._stored_tushare_token()
             if token != self._tushare_token:
@@ -577,10 +804,22 @@ def market_status() -> MarketStatus:
         description = "Sina 真实行情"
     elif market_data.last_source == "tushare":
         description = "Tushare 真实行情"
+    elif market_data.last_source == "efinance":
+        description = "efinance 真实行情"
+    elif market_data.last_source == "baostock":
+        description = "BaoStock 真实行情"
+    elif market_data.last_source == "tencent":
+        description = "Tencent 真实行情"
     elif settings.provider in {"auto", "akshare"}:
         description = "AkShare 失败，已回退示例数据"
     elif settings.provider == "tushare":
         description = "Tushare 失败，已回退备用源"
+    elif settings.provider == "efinance":
+        description = "efinance 失败，已回退备用源"
+    elif settings.provider == "baostock":
+        description = "BaoStock 失败，已回退备用源"
+    elif settings.provider == "tencent":
+        description = "Tencent 失败，已回退备用源"
     else:
         description = market_data.description
     return MarketStatus(

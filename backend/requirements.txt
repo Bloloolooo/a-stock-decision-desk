@@ -2,4 +2,7 @@ fastapi==0.115.6
 uvicorn[standard]==0.34.0
 pydantic==2.10.4
 akshare==1.18.62
+baostock>=0.8.9
+efinance>=0.5.3
+tushare>=1.4.24
 pytest==8.3.4
