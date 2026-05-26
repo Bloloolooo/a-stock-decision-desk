@@ -81,6 +81,17 @@ class MarketStatus(BaseModel):
     updated_at: datetime
 
 
+class MarketSettings(BaseModel):
+    provider: str
+    tushare_token_configured: bool = False
+    updated_at: datetime
+
+
+class MarketSettingsUpdate(BaseModel):
+    provider: str
+    tushare_token: str = ""
+
+
 class MarketPeriod(BaseModel):
     key: str
     label: str
@@ -165,3 +176,55 @@ class PredictionResult(BaseModel):
     expected_change_pct: float
     generated_at: datetime
     message: str
+
+
+class IndicatorPoint(BaseModel):
+    timestamp: str
+    value: float | None = None
+    signal: float | None = None
+    histogram: float | None = None
+    k: float | None = None
+    d: float | None = None
+    j: float | None = None
+
+
+class ChipLevel(BaseModel):
+    price: float
+    volume_ratio: float
+    label: str
+
+
+class IntradayGame(BaseModel):
+    status: str
+    buy_power_pct: float
+    sell_power_pct: float
+    vwap: float
+    price_vs_vwap_pct: float
+    description: str
+
+
+class DecisionAdvice(BaseModel):
+    action: str
+    confidence: int
+    reasons: list[str]
+    warnings: list[str]
+
+
+class DecisionCenter(BaseModel):
+    symbol: str
+    name: str
+    current_price: float
+    trend_status: str
+    volume_status: str
+    volume_ratio: float
+    turnover_rate: float | None = None
+    support_price: float
+    resistance_price: float
+    macd_status: str
+    kdj_status: str
+    intraday_game: IntradayGame
+    chips: list[ChipLevel]
+    macd: list[IndicatorPoint]
+    kdj: list[IndicatorPoint]
+    advice: DecisionAdvice
+    updated_at: datetime

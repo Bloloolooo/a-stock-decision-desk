@@ -55,6 +55,12 @@ export type MarketStatus = {
   updated_at: string;
 };
 
+export type MarketSettings = {
+  provider: string;
+  tushare_token_configured: boolean;
+  updated_at: string;
+};
+
 export type MarketPeriod = {
   key: string;
   label: string;
@@ -144,4 +150,52 @@ export type PredictionResult = {
   expected_change_pct: number;
   generated_at: string;
   message: string;
+};
+
+export type IndicatorPoint = {
+  timestamp: string;
+  value?: number | null;
+  signal?: number | null;
+  histogram?: number | null;
+  k?: number | null;
+  d?: number | null;
+  j?: number | null;
+};
+
+export type ChipLevel = {
+  price: number;
+  volume_ratio: number;
+  label: string;
+};
+
+export type DecisionCenter = {
+  symbol: string;
+  name: string;
+  current_price: number;
+  trend_status: string;
+  volume_status: string;
+  volume_ratio: number;
+  turnover_rate?: number | null;
+  support_price: number;
+  resistance_price: number;
+  macd_status: string;
+  kdj_status: string;
+  intraday_game: {
+    status: string;
+    buy_power_pct: number;
+    sell_power_pct: number;
+    vwap: number;
+    price_vs_vwap_pct: number;
+    description: string;
+  };
+  chips: ChipLevel[];
+  macd: IndicatorPoint[];
+  kdj: IndicatorPoint[];
+  advice: {
+    action: string;
+    confidence: number;
+    reasons: string[];
+    warnings: string[];
+  };
+  updated_at: string;
 };

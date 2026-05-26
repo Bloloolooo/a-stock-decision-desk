@@ -1,7 +1,7 @@
 from fastapi import APIRouter
 
-from app.schemas import MarketPeriod, MarketStatus, PriceBar, StockInfo
-from app.services.market_data import market_data, market_periods, market_status, stock_info
+from app.schemas import MarketPeriod, MarketSettings, MarketSettingsUpdate, MarketStatus, PriceBar, StockInfo
+from app.services.market_data import market_data, market_periods, market_settings, market_status, stock_info, update_market_settings
 
 router = APIRouter()
 
@@ -9,6 +9,16 @@ router = APIRouter()
 @router.get("/status", response_model=MarketStatus)
 def get_market_status() -> MarketStatus:
     return market_status()
+
+
+@router.get("/settings", response_model=MarketSettings)
+def get_market_settings() -> MarketSettings:
+    return market_settings()
+
+
+@router.put("/settings", response_model=MarketSettings)
+def save_market_settings(payload: MarketSettingsUpdate) -> MarketSettings:
+    return update_market_settings(provider=payload.provider, tushare_token=payload.tushare_token)
 
 
 @router.get("/periods", response_model=list[MarketPeriod])

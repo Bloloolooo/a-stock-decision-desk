@@ -81,6 +81,16 @@ def init_db() -> None:
         )
         connection.execute(
             """
+            CREATE TABLE IF NOT EXISTS market_settings (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                provider TEXT NOT NULL DEFAULT 'auto',
+                tushare_token TEXT NOT NULL DEFAULT '',
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            """
             INSERT OR IGNORE INTO account (id, cash, updated_at)
             VALUES (1, 92180.0, datetime('now'))
             """
@@ -108,5 +118,11 @@ def init_db() -> None:
                 1, 0, 'NeoQuasar/Kronos-small', 'NeoQuasar/Kronos-Tokenizer-base',
                 'not_installed', NULL, NULL, datetime('now')
             )
+            """
+        )
+        connection.execute(
+            """
+            INSERT OR IGNORE INTO market_settings (id, provider, tushare_token, updated_at)
+            VALUES (1, 'auto', '', datetime('now'))
             """
         )

@@ -8,7 +8,8 @@ from typing import Protocol
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 
-from app.schemas import MarketPeriod, MarketStatus, PriceBar, StockInfo
+from app.db import get_connection, init_db
+from app.schemas import MarketPeriod, MarketSettings, MarketStatus, PriceBar, StockInfo
 
 
 class MarketDataProvider(Protocol):
@@ -344,11 +345,224 @@ class AkShareMarketDataProvider:
         return f"sh{symbol}" if symbol.startswith("6") else f"sz{symbol}"
 
 
+class SinaMarketDataProvider(AkShareMarketDataProvider):
+    provider_name = "sina"
+    description = "Sina 免费公开行情"
+
+    def bars(self, symbol: str, period: str = "daily", adjust: str = "qfq") -> list[PriceBar]:
+        cache_key = (symbol, period, adjust)
+        cached = self._bars_cache.get(cache_key)
+        if cached and (datetime.now() - cached[0]).total_seconds() < 60:
+            self.last_source = "sina"
+            self.last_error = None
+            return cached[1]
+        try:
+            bars = self._fetch_sina_bars(symbol=symbol, period=period, adjust=adjust)
+            self.last_source = "sina"
+            self.last_error = None
+            self._bars_cache[cache_key] = (datetime.now(), bars)
+            return bars
+        except Exception as exc:
+            self.last_source = "sample"
+            self.last_error = f"Sina 失败：{exc}"
+            return self.fallback.bars(symbol=symbol, period=period, adjust=adjust)
+
+
+class TushareMarketDataProvider(AkShareMarketDataProvider):
+    provider_name = "tushare"
+    description = "Tushare Pro，可选 Token 数据源"
+
+    def __init__(self, token: str, fallback: MarketDataProvider | None = None) -> None:
+        super().__init__(fallback=fallback)
+        self.token = token
+
+    def bars(self, symbol: str, period: str = "daily", adjust: str = "qfq") -> list[PriceBar]:
+        if not self.token:
+            self.last_source = "sample"
+            self.last_error = "Tushare Token 未配置"
+            return self.fallback.bars(symbol=symbol, period=period, adjust=adjust)
+        if period not in {"daily", "weekly", "monthly"}:
+            self.last_error = "Tushare 分时接口暂未接入，已回退 AkShare/Sina"
+            return super().bars(symbol=symbol, period=period, adjust=adjust)
+        cache_key = (symbol, period, adjust)
+        cached = self._bars_cache.get(cache_key)
+        if cached and (datetime.now() - cached[0]).total_seconds() < 60:
+            self.last_source = "tushare"
+            self.last_error = None
+            return cached[1]
+        try:
+            import tushare as ts
+
+            ts.set_token(self.token)
+            pro = ts.pro_api()
+            ts_code = f"{symbol}.SH" if symbol.startswith("6") else f"{symbol}.SZ"
+            frame = pro.daily(ts_code=ts_code)
+            if frame.empty:
+                raise RuntimeError("Tushare 返回空行情")
+            frame = frame.sort_values("trade_date").tail(180)
+            bars: list[PriceBar] = []
+            now = datetime.now()
+            for row in frame.to_dict("records"):
+                trade_date = datetime.strptime(str(row["trade_date"]), "%Y%m%d").date()
+                close = float(row["close"])
+                volume = float(row.get("vol", 0)) * 100
+                bars.append(
+                    PriceBar(
+                        symbol=symbol,
+                        period=period,
+                        trade_date=trade_date,
+                        timestamp=trade_date.isoformat(),
+                        open=float(row["open"]),
+                        high=float(row["high"]),
+                        low=float(row["low"]),
+                        close=close,
+                        volume=volume,
+                        amount=float(row.get("amount", 0)) * 1000,
+                        turnover_rate=None,
+                        adjust=adjust,
+                        updated_at=now,
+                    )
+                )
+            if period in {"weekly", "monthly"}:
+                bars = self._aggregate_bars(bars=bars, period=period, adjust=adjust)
+            self.last_source = "tushare"
+            self.last_error = None
+            self._bars_cache[cache_key] = (datetime.now(), bars)
+            return bars
+        except Exception as exc:
+            self.last_error = f"Tushare 失败：{exc}"
+            return super().bars(symbol=symbol, period=period, adjust=adjust)
+
+    def _aggregate_bars(self, bars: list[PriceBar], period: str, adjust: str) -> list[PriceBar]:
+        grouped: dict[str, list[PriceBar]] = {}
+        for bar in bars:
+            day = bar.trade_date
+            if period == "weekly":
+                year, week, _ = day.isocalendar()
+                key = f"{year}-W{week:02d}"
+            else:
+                key = day.strftime("%Y-%m")
+            grouped.setdefault(key, []).append(bar)
+        now = datetime.now()
+        result: list[PriceBar] = []
+        for group in grouped.values():
+            first = group[0]
+            last = group[-1]
+            result.append(
+                PriceBar(
+                    symbol=last.symbol,
+                    period=period,
+                    trade_date=last.trade_date,
+                    timestamp=last.trade_date.isoformat(),
+                    open=first.open,
+                    high=max(bar.high for bar in group),
+                    low=min(bar.low for bar in group),
+                    close=last.close,
+                    volume=sum(bar.volume for bar in group),
+                    amount=sum(bar.amount for bar in group),
+                    turnover_rate=None,
+                    adjust=adjust,
+                    updated_at=now,
+                )
+            )
+        return result
+
+
+class MarketDataManager:
+    provider_name = "auto"
+    description = "自动选择真实行情源"
+    last_source = "auto"
+    last_error: str | None = None
+
+    def __init__(self) -> None:
+        init_db()
+        self.sample = SampleMarketDataProvider()
+        self.akshare = AkShareMarketDataProvider(fallback=self.sample)
+        self.sina = SinaMarketDataProvider(fallback=self.sample)
+        self._tushare_token = ""
+        self.tushare = TushareMarketDataProvider(token="", fallback=self.sample)
+
+    def settings(self) -> MarketSettings:
+        with get_connection() as connection:
+            row = connection.execute(
+                """
+                SELECT provider, tushare_token, updated_at
+                FROM market_settings WHERE id = 1
+                """
+            ).fetchone()
+        if not row:
+            return MarketSettings(provider="auto", tushare_token_configured=False, updated_at=datetime.now())
+        token = row["tushare_token"] or ""
+        return MarketSettings(
+            provider=row["provider"] or "auto",
+            tushare_token_configured=bool(token.strip()),
+            updated_at=datetime.fromisoformat(row["updated_at"]),
+        )
+
+    def update_settings(self, provider: str, tushare_token: str = "") -> MarketSettings:
+        normalized = provider if provider in {"auto", "akshare", "sina", "tushare", "sample"} else "auto"
+        current_token = self._stored_tushare_token()
+        token = tushare_token.strip() or current_token
+        with get_connection() as connection:
+            connection.execute(
+                """
+                UPDATE market_settings
+                SET provider = ?, tushare_token = ?, updated_at = datetime('now')
+                WHERE id = 1
+                """,
+                (normalized, token),
+            )
+        self._tushare_token = token
+        self.tushare = TushareMarketDataProvider(token=token, fallback=self.sample)
+        self._sync_status(self._provider())
+        return self.settings()
+
+    def latest_price(self, symbol: str) -> float:
+        return self._call("latest_price", symbol)
+
+    def name(self, symbol: str) -> str:
+        return self._call("name", symbol)
+
+    def bars(self, symbol: str, period: str = "daily", adjust: str = "qfq") -> list[PriceBar]:
+        return self._call("bars", symbol, period, adjust)
+
+    def _call(self, method: str, *args):
+        provider = self._provider()
+        result = getattr(provider, method)(*args)
+        self._sync_status(provider)
+        return result
+
+    def _provider(self) -> MarketDataProvider:
+        configured = self.settings().provider
+        self.provider_name = configured
+        if configured == "sample":
+            return self.sample
+        if configured == "sina":
+            return self.sina
+        if configured == "tushare":
+            token = self._stored_tushare_token()
+            if token != self._tushare_token:
+                self._tushare_token = token
+                self.tushare = TushareMarketDataProvider(token=token, fallback=self.sample)
+            return self.tushare
+        return self.akshare
+
+    def _stored_tushare_token(self) -> str:
+        with get_connection() as connection:
+            row = connection.execute("SELECT tushare_token FROM market_settings WHERE id = 1").fetchone()
+        return (row["tushare_token"] or "") if row else ""
+
+    def _sync_status(self, provider: MarketDataProvider) -> None:
+        self.last_source = provider.last_source
+        self.last_error = provider.last_error
+        self.description = provider.description
+
+
 sample_market_data = SampleMarketDataProvider()
 akshare_market_data = AkShareMarketDataProvider(fallback=sample_market_data)
-market_data: MarketDataProvider = (
-    sample_market_data if os.getenv("MARKET_DATA_PROVIDER") == "sample" else akshare_market_data
-)
+market_data = MarketDataManager()
+if os.getenv("MARKET_DATA_PROVIDER") == "sample":
+    market_data.update_settings("sample")
 
 
 def stock_info(symbol: str) -> StockInfo:
@@ -356,21 +570,34 @@ def stock_info(symbol: str) -> StockInfo:
 
 
 def market_status() -> MarketStatus:
+    settings = market_data.settings()
     if market_data.last_source == "akshare":
         description = "AkShare 真实行情"
     elif market_data.last_source == "sina":
         description = "Sina 真实行情"
-    elif market_data.provider_name == "akshare":
+    elif market_data.last_source == "tushare":
+        description = "Tushare 真实行情"
+    elif settings.provider in {"auto", "akshare"}:
         description = "AkShare 失败，已回退示例数据"
+    elif settings.provider == "tushare":
+        description = "Tushare 失败，已回退备用源"
     else:
         description = market_data.description
     return MarketStatus(
-        provider=market_data.provider_name,
+        provider=settings.provider,
         active_source=market_data.last_source,
         description=description,
         last_error=market_data.last_error,
         updated_at=datetime.now(),
     )
+
+
+def market_settings() -> MarketSettings:
+    return market_data.settings()
+
+
+def update_market_settings(provider: str, tushare_token: str = "") -> MarketSettings:
+    return market_data.update_settings(provider=provider, tushare_token=tushare_token)
 
 
 def market_periods() -> list[MarketPeriod]:

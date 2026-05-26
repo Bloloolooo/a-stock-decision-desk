@@ -1,4 +1,4 @@
-import type { MarketPeriod, MarketStatus, PortfolioSummary, Position, PositionInput, PredictionResult, PredictionStatus, PriceBar, RiskAdvice, ScreenerConfig, ScreenerResult, ScreenerStatus, SellInput, TradeRecord } from "./types";
+import type { DecisionCenter, MarketPeriod, MarketSettings, MarketStatus, PortfolioSummary, Position, PositionInput, PredictionResult, PredictionStatus, PriceBar, RiskAdvice, ScreenerConfig, ScreenerResult, ScreenerStatus, SellInput, TradeRecord } from "./types";
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? "http://localhost:8000/api";
 
@@ -42,8 +42,11 @@ export const api = {
   upsertPosition: (position: PositionInput) => postJson<Position>("/portfolio/positions", position),
   sellPosition: (position: SellInput) => postJson<PortfolioSummary>("/portfolio/sell", position),
   marketStatus: () => getJson<MarketStatus>("/market/status"),
+  marketSettings: () => getJson<MarketSettings>("/market/settings"),
+  updateMarketSettings: (provider: string, tushare_token: string) => putJson<MarketSettings>("/market/settings", { provider, tushare_token }),
   marketPeriods: () => getJson<MarketPeriod[]>("/market/periods"),
   bars: (symbol: string, period: string) => getJson<PriceBar[]>(`/market/bars/${symbol}?period=${period}`),
+  decision: (symbol: string) => getJson<DecisionCenter>(`/decision/${symbol}`),
   risk: (symbol: string) => getJson<RiskAdvice>(`/risk/advice/${symbol}`),
   screener: (type: "trend" | "rebound") => getJson<ScreenerResult[]>(`/screener/results?type=${type}`),
   screenerConfig: () => getJson<ScreenerConfig>("/screener/config"),

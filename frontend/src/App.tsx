@@ -2,7 +2,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { createChart, ColorType, type IChartApi, type UTCTimestamp } from "lightweight-charts";
 
 import { api } from "./api";
-import type { MarketPeriod, MarketStatus, PortfolioSummary, Position, PredictionResult, PredictionStatus, PriceBar, RiskAdvice, ScreenerConfig, ScreenerResult, ScreenerStatus, TradeRecord } from "./types";
+import type { DecisionCenter, MarketPeriod, MarketSettings, MarketStatus, PortfolioSummary, Position, PredictionResult, PredictionStatus, PriceBar, RiskAdvice, ScreenerConfig, ScreenerResult, ScreenerStatus, TradeRecord } from "./types";
 
 const emptySummary: PortfolioSummary = {
   total_assets: 0,
@@ -72,6 +72,8 @@ export default function App() {
   const [predictionStatus, setPredictionStatus] = useState<PredictionStatus | null>(null);
   const [prediction, setPrediction] = useState<PredictionResult | null>(null);
   const [marketStatus, setMarketStatus] = useState<MarketStatus | null>(null);
+  const [marketSettings, setMarketSettings] = useState<MarketSettings | null>(null);
+  const [decision, setDecision] = useState<DecisionCenter | null>(null);
   const [periods, setPeriods] = useState<MarketPeriod[]>(defaultPeriods);
   const [autoRefreshSeconds, setAutoRefreshSeconds] = useState(10);
   const [status, setStatus] = useState("加载中");
@@ -92,12 +94,14 @@ export default function App() {
     return api.bars(selectedSymbol, period)
       .then((barData) => {
         setBars(barData);
-        return Promise.all([api.risk(selectedSymbol), api.marketStatus()]);
+        return Promise.all([api.risk(selectedSymbol), api.decision(selectedSymbol), api.marketStatus()]);
       })
       .then((result) => {
         const riskData = result[0] as RiskAdvice;
-        const marketStatusData = result[1] as MarketStatus;
+        const decisionData = result[1] as DecisionCenter;
+        const marketStatusData = result[2] as MarketStatus;
         setRisk(riskData);
+        setDecision(decisionData);
         setMarketStatus(marketStatusData);
         setStatus(`${marketStatusData.description}已更新`);
       })
@@ -134,6 +138,23 @@ export default function App() {
 
   const reloadPredictionStatus = () => api.predictionStatus().then(setPredictionStatus);
 
+  const saveMarketSettings = (provider: string, tushareToken: string) => {
+    setStatus("保存数据源设置中");
+    return api.updateMarketSettings(provider, tushareToken)
+      .then((settingsData) => {
+        setMarketSettings(settingsData);
+        return Promise.all([api.marketStatus(), reloadMarket()]);
+      })
+      .then(([marketStatusData]) => {
+        setMarketStatus(marketStatusData);
+        setStatus("数据源设置已更新");
+      })
+      .catch((error) => {
+        setStatus("数据源设置保存失败");
+        throw error;
+      });
+  };
+
   const savePredictionSettings = (enabled: boolean, modelName: string) => {
     setStatus(enabled ? "正在准备预测环境" : "预测功能已关闭");
     return api.updatePredictionSettings(enabled, modelName)
@@ -159,8 +180,8 @@ export default function App() {
   };
 
   useEffect(() => {
-    Promise.all([api.summary(), api.positions(), api.trades(), api.screenerConfig(), api.screenerStatus(), api.predictionStatus(), api.marketStatus(), api.marketPeriods()])
-      .then(([summaryData, positionData, tradeData, configData, statusData, predictionStatusData, marketStatusData, periodData]) => {
+    Promise.all([api.summary(), api.positions(), api.trades(), api.screenerConfig(), api.screenerStatus(), api.predictionStatus(), api.marketStatus(), api.marketSettings(), api.marketPeriods()])
+      .then(([summaryData, positionData, tradeData, configData, statusData, predictionStatusData, marketStatusData, marketSettingsData, periodData]) => {
         setSummary(summaryData);
         setPositions(positionData);
         setTrades(tradeData);
@@ -168,6 +189,7 @@ export default function App() {
         setScreenerStatus(statusData);
         setPredictionStatus(predictionStatusData);
         setMarketStatus(marketStatusData);
+        setMarketSettings(marketSettingsData);
         setPeriods(periodData);
         setStatus(`${marketStatusData.description}已更新`);
       })
@@ -214,6 +236,7 @@ export default function App() {
           positions={positions}
           bars={bars}
           risk={risk}
+          decision={decision}
           selectedSymbol={selectedSymbol}
           period={period}
           onSelectSymbol={setSelectedSymbol}
@@ -259,6 +282,8 @@ export default function App() {
           screenerConfig={screenerConfig}
           screenerStatus={screenerStatus}
           onSaveScreenerSymbols={saveScreenerSymbols}
+          marketSettings={marketSettings}
+          onSaveMarketSettings={saveMarketSettings}
           predictionStatus={predictionStatus}
           onSavePredictionSettings={savePredictionSettings}
         />
@@ -272,6 +297,7 @@ function HomePage(props: {
   positions: Position[];
   bars: PriceBar[];
   risk: RiskAdvice | null;
+  decision: DecisionCenter | null;
   selectedSymbol: string;
   period: string;
   onSelectSymbol: (symbol: string) => void;
@@ -467,6 +493,7 @@ function HomePage(props: {
         </section>
 
         <aside className="advisor">
+          <DecisionPanel decision={props.decision} />
           <section className="panel">
             <h2>风控建议</h2>
             <p>{props.risk?.message ?? "等待风控建议。"}</p>
@@ -597,6 +624,55 @@ function KLineChart({ bars, mode = "normal" }: { bars: PriceBar[]; mode?: "norma
         chart.timeScale().fitContent();
       }}
     />
+  );
+}
+
+function DecisionPanel({ decision }: { decision: DecisionCenter | null }) {
+  if (!decision) {
+    return (
+      <section className="panel decision-card">
+        <h2>决策中心</h2>
+        <p>等待指标计算。</p>
+      </section>
+    );
+  }
+  const warnings = decision.advice.warnings.length > 0 ? decision.advice.warnings : ["暂无明显风险警示。"];
+  return (
+    <section className="panel decision-card">
+      <div className="decision-head">
+        <div>
+          <h2>决策中心</h2>
+          <p>{decision.name} · {decision.symbol}</p>
+        </div>
+        <strong className={decision.advice.confidence >= 60 ? "up" : "down"}>{decision.advice.action}</strong>
+      </div>
+      <div className="decision-score">
+        <span>置信度</span>
+        <strong>{decision.advice.confidence}</strong>
+        <div><i style={{ width: `${decision.advice.confidence}%` }} /></div>
+      </div>
+      <div className="decision-mini-grid">
+        <MiniStat label="趋势" value={decision.trend_status} />
+        <MiniStat label="量能" value={`${decision.volume_status} · ${decision.volume_ratio.toFixed(2)}x`} />
+        <MiniStat label="MACD" value={decision.macd_status} />
+        <MiniStat label="KDJ" value={decision.kdj_status} />
+        <MiniStat label="分时博弈" value={`${decision.intraday_game.status} · 多 ${decision.intraday_game.buy_power_pct.toFixed(1)}%`} />
+        <MiniStat label="支撑/压力" value={`${decision.support_price.toFixed(2)} / ${decision.resistance_price.toFixed(2)}`} />
+      </div>
+      <div className="chip-list">
+        <span>筹码密集区</span>
+        {decision.chips.map((chip) => (
+          <div className="chip-bar" key={chip.price}>
+            <strong>{chip.price.toFixed(2)}</strong>
+            <div><i style={{ width: `${Math.max(6, chip.volume_ratio * 100)}%` }} /></div>
+          </div>
+        ))}
+      </div>
+      <ul className="signals compact">
+        {decision.advice.reasons.slice(0, 4).map((reason) => <li key={reason}>{reason}</li>)}
+        {warnings.map((warning) => <li key={warning}>{warning}</li>)}
+      </ul>
+    </section>
   );
 }
 
@@ -938,13 +1014,18 @@ function SettingsPage(props: {
   screenerConfig: ScreenerConfig | null;
   screenerStatus: ScreenerStatus | null;
   onSaveScreenerSymbols: (symbols: string[]) => Promise<void>;
+  marketSettings: MarketSettings | null;
+  onSaveMarketSettings: (provider: string, tushareToken: string) => Promise<void>;
   predictionStatus: PredictionStatus | null;
   onSavePredictionSettings: (enabled: boolean, modelName: string) => Promise<PredictionStatus>;
 }) {
   const [symbolsText, setSymbolsText] = useState((props.screenerConfig?.symbols ?? []).join(", "));
+  const [marketProvider, setMarketProvider] = useState(props.marketSettings?.provider ?? "auto");
+  const [tushareToken, setTushareToken] = useState("");
   const [predictionEnabled, setPredictionEnabled] = useState(Boolean(props.predictionStatus?.enabled));
   const [predictionModel, setPredictionModel] = useState(props.predictionStatus?.model_name ?? "NeoQuasar/Kronos-small");
   const [settingsStatus, setSettingsStatus] = useState("");
+  const [marketSettingsStatus, setMarketSettingsStatus] = useState("");
   const [predictionSettingsStatus, setPredictionSettingsStatus] = useState("");
 
   useEffect(() => {
@@ -955,6 +1036,10 @@ function SettingsPage(props: {
     setPredictionEnabled(Boolean(props.predictionStatus?.enabled));
     setPredictionModel(props.predictionStatus?.model_name ?? "NeoQuasar/Kronos-small");
   }, [props.predictionStatus]);
+
+  useEffect(() => {
+    setMarketProvider(props.marketSettings?.provider ?? "auto");
+  }, [props.marketSettings]);
 
   const saveSymbols = async () => {
     const symbols = symbolsText.split(/[\s,，]+/).map((symbol) => symbol.trim()).filter(Boolean);
@@ -975,6 +1060,16 @@ function SettingsPage(props: {
     }
   };
 
+  const saveMarket = async () => {
+    try {
+      await props.onSaveMarketSettings(marketProvider, tushareToken);
+      setMarketSettingsStatus("数据源设置已保存。");
+      setTushareToken("");
+    } catch {
+      setMarketSettingsStatus("数据源设置保存失败。");
+    }
+  };
+
   return (
     <main className="settings-grid">
       <section className="panel settings-card">
@@ -991,6 +1086,22 @@ function SettingsPage(props: {
         </label>
         <MiniStat label="当前数据源" value={props.marketStatus?.description ?? "等待连接"} />
         <MiniStat label="底层提供方" value={props.marketStatus?.provider ?? "--"} />
+        <label>
+          数据源
+          <select value={marketProvider} onChange={(event) => setMarketProvider(event.target.value)}>
+            <option value="auto">自动</option>
+            <option value="akshare">AkShare</option>
+            <option value="sina">Sina</option>
+            <option value="tushare">Tushare</option>
+            <option value="sample">示例数据</option>
+          </select>
+        </label>
+        <label>
+          Tushare Token
+          <input value={tushareToken} onChange={(event) => setTushareToken(event.target.value)} placeholder={props.marketSettings?.tushare_token_configured ? "已配置，留空则保留" : "可选"} />
+        </label>
+        <button className="primary-action" onClick={saveMarket}>保存数据源</button>
+        {marketSettingsStatus && <p>{marketSettingsStatus}</p>}
       </section>
       <section className="panel settings-card">
         <h2>风险参数</h2>

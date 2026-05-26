@@ -794,6 +794,15 @@ td small {
   color: #405064;
 }
 
+.settings-card input {
+  width: 100%;
+  border: 1px solid #cbd7e6;
+  border-radius: 6px;
+  padding: 8px;
+  background: #fff;
+  color: #111827;
+}
+
 .settings-card textarea {
   width: 100%;
   resize: vertical;
@@ -855,4 +864,88 @@ td small {
 
 .prediction-chart {
   min-height: 520px;
+}
+
+.decision-card {
+  display: grid;
+  gap: 10px;
+}
+
+.decision-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: start;
+}
+
+.decision-head strong {
+  font-size: 15px;
+  white-space: nowrap;
+}
+
+.decision-score {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px;
+  align-items: center;
+}
+
+.decision-score span,
+.chip-list > span {
+  color: #667085;
+  font-size: 12px;
+}
+
+.decision-score strong {
+  color: #1f4f8f;
+}
+
+.decision-score div,
+.chip-bar div {
+  grid-column: 1 / -1;
+  height: 7px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e8eff7;
+}
+
+.decision-score i,
+.chip-bar i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: #1f4f8f;
+}
+
+.decision-mini-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.chip-list {
+  display: grid;
+  gap: 7px;
+}
+
+.chip-bar {
+  display: grid;
+  grid-template-columns: 62px 1fr;
+  gap: 8px;
+  align-items: center;
+}
+
+.chip-bar strong {
+  color: #405064;
+  font-size: 12px;
+}
+
+.chip-bar div {
+  grid-column: auto;
+}
+
+.signals.compact {
+  margin-top: 0;
+  font-size: 12px;
+  line-height: 1.6;
 }
