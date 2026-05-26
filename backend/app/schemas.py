@@ -186,12 +186,24 @@ class IndicatorPoint(BaseModel):
     k: float | None = None
     d: float | None = None
     j: float | None = None
+    pdi: float | None = None
+    mdi: float | None = None
+    adx: float | None = None
 
 
 class ChipLevel(BaseModel):
     price: float
     volume_ratio: float
     label: str
+
+
+class ChipAnalysis(BaseModel):
+    status: str
+    support_strength: float
+    pressure_strength: float
+    nearest_support: float | None = None
+    nearest_pressure: float | None = None
+    description: str
 
 
 class IntradayGame(BaseModel):
@@ -210,6 +222,14 @@ class DecisionAdvice(BaseModel):
     warnings: list[str]
 
 
+class IndicatorScore(BaseModel):
+    group: str
+    name: str
+    status: str
+    value: str
+    contribution: int
+
+
 class DecisionCenter(BaseModel):
     symbol: str
     name: str
@@ -222,9 +242,19 @@ class DecisionCenter(BaseModel):
     resistance_price: float
     macd_status: str
     kdj_status: str
+    rsi_status: str
+    wr_status: str
+    psy_status: str
+    dmi_status: str
     intraday_game: IntradayGame
     chips: list[ChipLevel]
+    chip_analysis: ChipAnalysis
     macd: list[IndicatorPoint]
     kdj: list[IndicatorPoint]
+    rsi: list[IndicatorPoint]
+    wr: list[IndicatorPoint]
+    psy: list[IndicatorPoint]
+    dmi: list[IndicatorPoint]
+    indicator_matrix: list[IndicatorScore]
     advice: DecisionAdvice
     updated_at: datetime

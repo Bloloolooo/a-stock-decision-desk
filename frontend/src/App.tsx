@@ -701,8 +701,94 @@ function chartBollinger(values: number[], window = 20, multiplier = 2) {
   });
 }
 
-type MainChartType = "standard" | "boll";
-type SubChartType = "volume" | "macd" | "kdj" | "ratio";
+function chartBbiBoll(values: number[], window = 11, multiplier = 2) {
+  const ma3 = movingAverage(values, 3);
+  const ma6 = movingAverage(values, 6);
+  const ma12 = movingAverage(values, 12);
+  const ma24 = movingAverage(values, 24);
+  const bbi = values.map((_, index) => {
+    if (ma3[index] == null || ma6[index] == null || ma12[index] == null || ma24[index] == null) return null;
+    return ((ma3[index] ?? 0) + (ma6[index] ?? 0) + (ma12[index] ?? 0) + (ma24[index] ?? 0)) / 4;
+  });
+  return bbi.map((middle, index) => {
+    if (middle == null || index + 1 < window) return null;
+    const scoped = bbi.slice(Math.max(0, index - window + 1), index + 1).filter((value): value is number => value != null);
+    if (scoped.length < Math.min(window, index + 1)) return null;
+    const average = scoped.reduce((sum, value) => sum + value, 0) / scoped.length;
+    const variance = scoped.reduce((sum, value) => sum + (value - average) ** 2, 0) / scoped.length;
+    const width = Math.sqrt(variance) * multiplier;
+    return { upper: middle + width, middle, lower: middle - width };
+  });
+}
+
+function chartRsi(values: number[], window = 14) {
+  return values.map((value, index) => {
+    if (index === 0) return 50;
+    const start = Math.max(1, index - window + 1);
+    let gain = 0;
+    let loss = 0;
+    for (let cursor = start; cursor <= index; cursor += 1) {
+      const change = values[cursor] - values[cursor - 1];
+      if (change >= 0) gain += change;
+      else loss -= change;
+    }
+    const length = index - start + 1;
+    const avgGain = gain / length;
+    const avgLoss = loss / length;
+    return avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss);
+  });
+}
+
+function chartWr(bars: Array<{ high: number; low: number; close: number }>, window = 14) {
+  return bars.map((bar, index) => {
+    const scoped = bars.slice(Math.max(0, index - window + 1), index + 1);
+    const high = Math.max(...scoped.map((item) => item.high));
+    const low = Math.min(...scoped.map((item) => item.low));
+    return high === low ? -50 : ((high - bar.close) / (high - low)) * -100;
+  });
+}
+
+function chartPsy(values: number[], window = 12) {
+  return values.map((_, index) => {
+    if (index === 0) return 50;
+    const start = Math.max(1, index - window + 1);
+    let upDays = 0;
+    for (let cursor = start; cursor <= index; cursor += 1) {
+      if (values[cursor] > values[cursor - 1]) upDays += 1;
+    }
+    return (upDays / (index - start + 1)) * 100;
+  });
+}
+
+function chartDmi(bars: Array<{ high: number; low: number; close: number }>, window = 14) {
+  const tr = [0];
+  const plusDm = [0];
+  const minusDm = [0];
+  for (let index = 1; index < bars.length; index += 1) {
+    const current = bars[index];
+    const previous = bars[index - 1];
+    const upMove = current.high - previous.high;
+    const downMove = previous.low - current.low;
+    plusDm.push(upMove > downMove && upMove > 0 ? upMove : 0);
+    minusDm.push(downMove > upMove && downMove > 0 ? downMove : 0);
+    tr.push(Math.max(current.high - current.low, Math.abs(current.high - previous.close), Math.abs(current.low - previous.close)));
+  }
+  const dx: number[] = [];
+  return bars.map((_, index) => {
+    const start = Math.max(0, index - window + 1);
+    const trSum = tr.slice(start, index + 1).reduce((sum, value) => sum + value, 0) || 1;
+    const pdi = plusDm.slice(start, index + 1).reduce((sum, value) => sum + value, 0) / trSum * 100;
+    const mdi = minusDm.slice(start, index + 1).reduce((sum, value) => sum + value, 0) / trSum * 100;
+    const currentDx = pdi + mdi ? Math.abs(pdi - mdi) / (pdi + mdi) * 100 : 0;
+    dx.push(currentDx);
+    const adxWindow = dx.slice(Math.max(0, index - window + 1), index + 1);
+    const adx = adxWindow.reduce((sum, value) => sum + value, 0) / adxWindow.length;
+    return { pdi, mdi, adx };
+  });
+}
+
+type MainChartType = "standard" | "boll" | "bbiboll";
+type SubChartType = "volume" | "macd" | "kdj" | "ratio" | "rsi" | "wr" | "psy" | "dmi";
 
 function KLineChart({ bars, mode = "normal" }: { bars: PriceBar[]; mode?: "normal" | "fullscreen" }) {
   const [mainChart, setMainChart] = useState<MainChartType>("standard");
@@ -765,6 +851,19 @@ function KLineChart({ bars, mode = "normal" }: { bars: PriceBar[]; mode?: "norma
       latest,
     };
   }, [chartData]);
+  const bbiBollData = useMemo(() => {
+    const points = chartBbiBoll(chartData.map((item) => item.close));
+    const toSeries = (key: "upper" | "middle" | "lower") => points
+      .map((point, index) => point == null ? null : { time: chartData[index].time, value: point[key] })
+      .filter((item): item is { time: UTCTimestamp | string; value: number } => item !== null);
+    const latest = [...points].reverse().find((point): point is { upper: number; middle: number; lower: number } => point !== null) ?? null;
+    return {
+      upper: toSeries("upper"),
+      middle: toSeries("middle"),
+      lower: toSeries("lower"),
+      latest,
+    };
+  }, [chartData]);
   const macdData = useMemo(() => {
     const points = chartMacd(chartData.map((item) => item.close));
     return {
@@ -798,6 +897,36 @@ function KLineChart({ bars, mode = "normal" }: { bars: PriceBar[]; mode?: "norma
       latest: ratios[ratios.length - 1],
     };
   }, [chartData]);
+  const rsiData = useMemo(() => {
+    const points = chartRsi(chartData.map((item) => item.close));
+    return {
+      line: points.map((value, index) => ({ time: chartData[index].time, value })),
+      latest: points[points.length - 1],
+    };
+  }, [chartData]);
+  const wrData = useMemo(() => {
+    const points = chartWr(chartData);
+    return {
+      line: points.map((value, index) => ({ time: chartData[index].time, value })),
+      latest: points[points.length - 1],
+    };
+  }, [chartData]);
+  const psyData = useMemo(() => {
+    const points = chartPsy(chartData.map((item) => item.close));
+    return {
+      line: points.map((value, index) => ({ time: chartData[index].time, value })),
+      latest: points[points.length - 1],
+    };
+  }, [chartData]);
+  const dmiData = useMemo(() => {
+    const points = chartDmi(chartData);
+    return {
+      pdi: points.map((point, index) => ({ time: chartData[index].time, value: point.pdi })),
+      mdi: points.map((point, index) => ({ time: chartData[index].time, value: point.mdi })),
+      adx: points.map((point, index) => ({ time: chartData[index].time, value: point.adx })),
+      latest: points[points.length - 1],
+    };
+  }, [chartData]);
   const latestMacd = macdData.histogram.length
     ? {
       dif: macdData.dif[macdData.dif.length - 1].value,
@@ -807,11 +936,14 @@ function KLineChart({ bars, mode = "normal" }: { bars: PriceBar[]; mode?: "norma
     : null;
   const latestVolume = volumeData[volumeData.length - 1]?.value ?? 0;
   const mainChartReadout = mainChart === "boll" && bollData.latest
-    ? `UP ${bollData.latest.upper.toFixed(2)}  MID ${bollData.latest.middle.toFixed(2)}  DN ${bollData.latest.lower.toFixed(2)}`
-    : isMinuteChart ? "分时 + VWAP" : "K线 + MA5/10/20/60";
+    ? `BOLL UP ${bollData.latest.upper.toFixed(2)}  MID ${bollData.latest.middle.toFixed(2)}  DN ${bollData.latest.lower.toFixed(2)}`
+    : mainChart === "bbiboll" && bbiBollData.latest
+      ? `BBI UP ${bbiBollData.latest.upper.toFixed(2)}  BBI ${bbiBollData.latest.middle.toFixed(2)}  DN ${bbiBollData.latest.lower.toFixed(2)}`
+      : isMinuteChart ? "分时 + VWAP" : "K线 + MA5/10/20/60";
   const mainChartTabs: Array<{ key: MainChartType; label: string }> = [
     { key: "standard", label: "常规" },
     { key: "boll", label: "布林(BOLL)" },
+    { key: "bbiboll", label: "BBIBOLL" },
   ];
   const subchartReadout = {
     volume: `成交量 ${latestVolume.toLocaleString("zh-CN", { maximumFractionDigits: 0 })}`,
@@ -822,12 +954,20 @@ function KLineChart({ bars, mode = "normal" }: { bars: PriceBar[]; mode?: "norma
       ? `K ${kdjData.latest.k.toFixed(1)}  D ${kdjData.latest.d.toFixed(1)}  J ${kdjData.latest.j.toFixed(1)}`
       : "KDJ 暂无",
     ratio: `量比 ${(volumeRatioData.latest ?? 1).toFixed(2)}`,
+    rsi: `RSI ${(rsiData.latest ?? 50).toFixed(1)}`,
+    wr: `WR ${(wrData.latest ?? -50).toFixed(1)}`,
+    psy: `PSY ${(psyData.latest ?? 50).toFixed(1)}`,
+    dmi: dmiData.latest ? `+DI ${dmiData.latest.pdi.toFixed(1)}  -DI ${dmiData.latest.mdi.toFixed(1)}  ADX ${dmiData.latest.adx.toFixed(1)}` : "DMI 暂无",
   } satisfies Record<SubChartType, string>;
   const subchartTabs: Array<{ key: SubChartType; label: string }> = [
     { key: "volume", label: "成交量" },
     { key: "macd", label: "MACD" },
     { key: "kdj", label: "KDJ" },
     { key: "ratio", label: "量比" },
+    { key: "rsi", label: "RSI" },
+    { key: "wr", label: "WR" },
+    { key: "psy", label: "PSY" },
+    { key: "dmi", label: "DMI" },
   ];
 
   return (
@@ -899,13 +1039,14 @@ function KLineChart({ bars, mode = "normal" }: { bars: PriceBar[]; mode?: "norma
               });
             }
           }
-          if (mainChart === "boll") {
+          if (mainChart === "boll" || mainChart === "bbiboll") {
+            const activeBand = mainChart === "boll" ? bollData : bbiBollData;
             const upperSeries = chart.addLineSeries({ color: "#f0b84f", lineWidth: 1, lineStyle: LineStyle.Dashed, priceLineVisible: false, lastValueVisible: false });
             const middleSeries = chart.addLineSeries({ color: "#8ecae6", lineWidth: 2, priceLineVisible: false, lastValueVisible: false });
             const lowerSeries = chart.addLineSeries({ color: "#f0b84f", lineWidth: 1, lineStyle: LineStyle.Dashed, priceLineVisible: false, lastValueVisible: false });
-            upperSeries.setData(bollData.upper);
-            middleSeries.setData(bollData.middle);
-            lowerSeries.setData(bollData.lower);
+            upperSeries.setData(activeBand.upper);
+            middleSeries.setData(activeBand.middle);
+            lowerSeries.setData(activeBand.lower);
           }
           chart.subscribeCrosshairMove((param) => {
             const tooltip = tooltipRef.current;
@@ -987,15 +1128,35 @@ function KLineChart({ bars, mode = "normal" }: { bars: PriceBar[]; mode?: "norma
             const line = chart.addLineSeries({ color: "#f0c04f", lineWidth: 2, priceLineVisible: false });
             line.setData(volumeRatioData.line);
           }
+          if (subchart === "rsi") {
+            const line = chart.addLineSeries({ color: "#4ea4ff", lineWidth: 2, priceLineVisible: false });
+            line.setData(rsiData.line);
+          }
+          if (subchart === "wr") {
+            const line = chart.addLineSeries({ color: "#d879ff", lineWidth: 2, priceLineVisible: false });
+            line.setData(wrData.line);
+          }
+          if (subchart === "psy") {
+            const line = chart.addLineSeries({ color: "#f0c04f", lineWidth: 2, priceLineVisible: false });
+            line.setData(psyData.line);
+          }
+          if (subchart === "dmi") {
+            const pdi = chart.addLineSeries({ color: "#d94b42", lineWidth: 2, priceLineVisible: false });
+            const mdi = chart.addLineSeries({ color: "#14a06f", lineWidth: 2, priceLineVisible: false });
+            const adx = chart.addLineSeries({ color: "#f0c04f", lineWidth: 2, priceLineVisible: false });
+            pdi.setData(dmiData.pdi);
+            mdi.setData(dmiData.mdi);
+            adx.setData(dmiData.adx);
+          }
           chart.timeScale().fitContent();
         }}
       />
       <div className="chart-legend">
-        {mainChart === "boll" ? (
+        {mainChart === "boll" || mainChart === "bbiboll" ? (
           <>
             <span><i style={{ background: "#69a8ff" }} />价格</span>
-            <span><i style={{ background: "#f0b84f" }} />BOLL上/下轨</span>
-            <span><i style={{ background: "#8ecae6" }} />BOLL中轨</span>
+            <span><i style={{ background: "#f0b84f" }} />{mainChart === "boll" ? "BOLL" : "BBIBOLL"}上/下轨</span>
+            <span><i style={{ background: "#8ecae6" }} />{mainChart === "boll" ? "BOLL" : "BBI"}中轨</span>
           </>
         ) : isMinuteChart ? (
           <>
@@ -1026,6 +1187,16 @@ function KLineChart({ bars, mode = "normal" }: { bars: PriceBar[]; mode?: "norma
           </>
         )}
         {subchart === "ratio" && <span><i style={{ background: "#f0c04f" }} />量比</span>}
+        {subchart === "rsi" && <span><i style={{ background: "#4ea4ff" }} />RSI</span>}
+        {subchart === "wr" && <span><i style={{ background: "#d879ff" }} />WR</span>}
+        {subchart === "psy" && <span><i style={{ background: "#f0c04f" }} />PSY</span>}
+        {subchart === "dmi" && (
+          <>
+            <span><i style={{ background: "#d94b42" }} />+DI</span>
+            <span><i style={{ background: "#14a06f" }} />-DI</span>
+            <span><i style={{ background: "#f0c04f" }} />ADX</span>
+          </>
+        )}
       </div>
     </div>
   );
@@ -1060,11 +1231,15 @@ function DecisionPanel({ decision }: { decision: DecisionCenter | null }) {
         <MiniStat label="量能" value={`${decision.volume_status} · ${decision.volume_ratio.toFixed(2)}x`} />
         <MiniStat label="MACD" value={decision.macd_status} />
         <MiniStat label="KDJ" value={decision.kdj_status} />
+        <MiniStat label="DMI" value={decision.dmi_status} />
+        <MiniStat label="心理线" value={decision.psy_status} />
+        <MiniStat label="RSI/WR" value={`${decision.rsi_status} · ${decision.wr_status}`} />
         <MiniStat label="分时博弈" value={`${decision.intraday_game.status} · 多 ${decision.intraday_game.buy_power_pct.toFixed(1)}%`} />
         <MiniStat label="支撑/压力" value={`${decision.support_price.toFixed(2)} / ${decision.resistance_price.toFixed(2)}`} />
       </div>
       <div className="chip-list">
-        <span>筹码密集区</span>
+        <span>筹码密集区 · {decision.chip_analysis.status}</span>
+        <p>{decision.chip_analysis.description}</p>
         {decision.chips.map((chip) => (
           <div className="chip-bar" key={chip.price}>
             <strong>{chip.price.toFixed(2)}</strong>
@@ -1072,8 +1247,18 @@ function DecisionPanel({ decision }: { decision: DecisionCenter | null }) {
           </div>
         ))}
       </div>
+      <div className="indicator-matrix">
+        {decision.indicator_matrix.map((item) => (
+          <div className="indicator-chip" key={`${item.group}-${item.name}`}>
+            <span>{item.group}</span>
+            <strong>{item.name}</strong>
+            <small>{item.status}</small>
+            <em className={item.contribution >= 0 ? "up" : "down"}>{item.contribution >= 0 ? "+" : ""}{item.contribution}</em>
+          </div>
+        ))}
+      </div>
       <ul className="signals compact">
-        {decision.advice.reasons.slice(0, 4).map((reason) => <li key={reason}>{reason}</li>)}
+        {decision.advice.reasons.slice(0, 6).map((reason) => <li key={reason}>{reason}</li>)}
         {warnings.map((warning) => <li key={warning}>{warning}</li>)}
       </ul>
     </section>

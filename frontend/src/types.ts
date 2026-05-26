@@ -160,12 +160,32 @@ export type IndicatorPoint = {
   k?: number | null;
   d?: number | null;
   j?: number | null;
+  pdi?: number | null;
+  mdi?: number | null;
+  adx?: number | null;
 };
 
 export type ChipLevel = {
   price: number;
   volume_ratio: number;
   label: string;
+};
+
+export type ChipAnalysis = {
+  status: string;
+  support_strength: number;
+  pressure_strength: number;
+  nearest_support?: number | null;
+  nearest_pressure?: number | null;
+  description: string;
+};
+
+export type IndicatorScore = {
+  group: string;
+  name: string;
+  status: string;
+  value: string;
+  contribution: number;
 };
 
 export type DecisionCenter = {
@@ -180,6 +200,10 @@ export type DecisionCenter = {
   resistance_price: number;
   macd_status: string;
   kdj_status: string;
+  rsi_status: string;
+  wr_status: string;
+  psy_status: string;
+  dmi_status: string;
   intraday_game: {
     status: string;
     buy_power_pct: number;
@@ -189,8 +213,14 @@ export type DecisionCenter = {
     description: string;
   };
   chips: ChipLevel[];
+  chip_analysis: ChipAnalysis;
   macd: IndicatorPoint[];
   kdj: IndicatorPoint[];
+  rsi: IndicatorPoint[];
+  wr: IndicatorPoint[];
+  psy: IndicatorPoint[];
+  dmi: IndicatorPoint[];
+  indicator_matrix: IndicatorScore[];
   advice: {
     action: string;
     confidence: number;
