@@ -811,3 +811,48 @@ td small {
   display: grid;
   gap: 8px;
 }
+
+.inline-setting {
+  grid-template-columns: auto 1fr;
+  align-items: center;
+}
+
+.prediction-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.prediction-empty {
+  min-height: 280px;
+  display: grid;
+  align-content: center;
+  justify-items: start;
+  gap: 10px;
+}
+
+.prediction-toolbar {
+  display: flex;
+  align-items: end;
+  gap: 12px;
+}
+
+.prediction-toolbar label {
+  display: grid;
+  gap: 5px;
+  color: #667085;
+  font-size: 12px;
+}
+
+.prediction-toolbar input,
+.prediction-toolbar select {
+  min-width: 140px;
+  border: 1px solid #cbd7e6;
+  border-radius: 6px;
+  padding: 8px;
+  background: #fff;
+  color: #111827;
+}
+
+.prediction-chart {
+  min-height: 520px;
+}

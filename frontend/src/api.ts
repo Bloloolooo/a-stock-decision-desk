@@ -1,4 +1,4 @@
-import type { MarketPeriod, MarketStatus, PortfolioSummary, Position, PositionInput, PriceBar, RiskAdvice, ScreenerConfig, ScreenerResult, ScreenerStatus, SellInput, TradeRecord } from "./types";
+import type { MarketPeriod, MarketStatus, PortfolioSummary, Position, PositionInput, PredictionResult, PredictionStatus, PriceBar, RiskAdvice, ScreenerConfig, ScreenerResult, ScreenerStatus, SellInput, TradeRecord } from "./types";
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? "http://localhost:8000/api";
 
@@ -50,4 +50,8 @@ export const api = {
   updateScreenerConfig: (symbols: string[]) => putJson<ScreenerConfig>("/screener/config", { symbols }),
   screenerStatus: () => getJson<ScreenerStatus>("/screener/status"),
   refreshScreener: () => postJson<ScreenerStatus>("/screener/refresh", {}),
+  predictionStatus: () => getJson<PredictionStatus>("/prediction/status"),
+  updatePredictionSettings: (enabled: boolean, model_name: string) => putJson<PredictionStatus>("/prediction/settings", { enabled, model_name }),
+  installPrediction: () => postJson<PredictionStatus>("/prediction/install", {}),
+  prediction: (symbol: string, horizon: number) => getJson<PredictionResult>(`/prediction/${symbol}?horizon=${horizon}`),
 };

@@ -67,6 +67,20 @@ def init_db() -> None:
         )
         connection.execute(
             """
+            CREATE TABLE IF NOT EXISTS prediction_settings (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                enabled INTEGER NOT NULL DEFAULT 0,
+                model_name TEXT NOT NULL DEFAULT 'NeoQuasar/Kronos-small',
+                tokenizer_name TEXT NOT NULL DEFAULT 'NeoQuasar/Kronos-Tokenizer-base',
+                install_status TEXT NOT NULL DEFAULT 'not_installed',
+                last_error TEXT,
+                installed_at TEXT,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            """
             INSERT OR IGNORE INTO account (id, cash, updated_at)
             VALUES (1, 92180.0, datetime('now'))
             """
@@ -83,5 +97,16 @@ def init_db() -> None:
             """
             INSERT OR IGNORE INTO screener_config (id, symbols, updated_at)
             VALUES (1, '', datetime('now'))
+            """
+        )
+        connection.execute(
+            """
+            INSERT OR IGNORE INTO prediction_settings (
+                id, enabled, model_name, tokenizer_name, install_status, last_error, installed_at, updated_at
+            )
+            VALUES (
+                1, 0, 'NeoQuasar/Kronos-small', 'NeoQuasar/Kronos-Tokenizer-base',
+                'not_installed', NULL, NULL, datetime('now')
+            )
             """
         )

@@ -2,7 +2,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { createChart, ColorType, type IChartApi, type UTCTimestamp } from "lightweight-charts";
 
 import { api } from "./api";
-import type { MarketPeriod, MarketStatus, PortfolioSummary, Position, PriceBar, RiskAdvice, ScreenerConfig, ScreenerResult, ScreenerStatus, TradeRecord } from "./types";
+import type { MarketPeriod, MarketStatus, PortfolioSummary, Position, PredictionResult, PredictionStatus, PriceBar, RiskAdvice, ScreenerConfig, ScreenerResult, ScreenerStatus, TradeRecord } from "./types";
 
 const emptySummary: PortfolioSummary = {
   total_assets: 0,
@@ -57,7 +57,7 @@ function signed(value: number) {
 }
 
 export default function App() {
-  const [tab, setTab] = useState<"home" | "screener" | "review" | "settings">("home");
+  const [tab, setTab] = useState<"home" | "screener" | "prediction" | "review" | "settings">("home");
   const [selectedSymbol, setSelectedSymbol] = useState("300308");
   const [period, setPeriod] = useState("daily");
   const [summary, setSummary] = useState<PortfolioSummary>(emptySummary);
@@ -69,6 +69,8 @@ export default function App() {
   const [rebound, setRebound] = useState<ScreenerResult[]>([]);
   const [screenerConfig, setScreenerConfig] = useState<ScreenerConfig | null>(null);
   const [screenerStatus, setScreenerStatus] = useState<ScreenerStatus | null>(null);
+  const [predictionStatus, setPredictionStatus] = useState<PredictionStatus | null>(null);
+  const [prediction, setPrediction] = useState<PredictionResult | null>(null);
   const [marketStatus, setMarketStatus] = useState<MarketStatus | null>(null);
   const [periods, setPeriods] = useState<MarketPeriod[]>(defaultPeriods);
   const [autoRefreshSeconds, setAutoRefreshSeconds] = useState(10);
@@ -130,20 +132,51 @@ export default function App() {
       });
   };
 
+  const reloadPredictionStatus = () => api.predictionStatus().then(setPredictionStatus);
+
+  const savePredictionSettings = (enabled: boolean, modelName: string) => {
+    setStatus(enabled ? "正在准备预测环境" : "预测功能已关闭");
+    return api.updatePredictionSettings(enabled, modelName)
+      .then((statusData) => {
+        setPredictionStatus(statusData);
+        setStatus(enabled ? "预测功能已启用" : "预测功能已关闭");
+        return statusData;
+      })
+      .catch((error) => {
+        setStatus("预测设置保存失败");
+        throw error;
+      });
+  };
+
+  const runPrediction = (symbol: string, horizon: number) => {
+    setStatus("生成 K 线预测中");
+    return api.prediction(symbol, horizon)
+      .then((result) => {
+        setPrediction(result);
+        setStatus("预测已更新");
+      })
+      .catch(() => setStatus("预测尚未就绪"));
+  };
+
   useEffect(() => {
-    Promise.all([api.summary(), api.positions(), api.trades(), api.screenerConfig(), api.screenerStatus(), api.marketStatus(), api.marketPeriods()])
-      .then(([summaryData, positionData, tradeData, configData, statusData, marketStatusData, periodData]) => {
+    Promise.all([api.summary(), api.positions(), api.trades(), api.screenerConfig(), api.screenerStatus(), api.predictionStatus(), api.marketStatus(), api.marketPeriods()])
+      .then(([summaryData, positionData, tradeData, configData, statusData, predictionStatusData, marketStatusData, periodData]) => {
         setSummary(summaryData);
         setPositions(positionData);
         setTrades(tradeData);
         setScreenerConfig(configData);
         setScreenerStatus(statusData);
+        setPredictionStatus(predictionStatusData);
         setMarketStatus(marketStatusData);
         setPeriods(periodData);
         setStatus(`${marketStatusData.description}已更新`);
       })
       .catch(() => setStatus("后端未连接，等待数据"));
     reloadScreener().catch(() => undefined);
+    const predictionTimer = window.setInterval(() => {
+      reloadPredictionStatus().catch(() => undefined);
+    }, 5000);
+    return () => window.clearInterval(predictionTimer);
   }, []);
 
   useEffect(() => {
@@ -168,6 +201,7 @@ export default function App() {
         <nav className="tabs">
           <button className={tab === "home" ? "active" : ""} onClick={() => setTab("home")}>主页</button>
           <button className={tab === "screener" ? "active" : ""} onClick={() => setTab("screener")}>选股雷达</button>
+          <button className={tab === "prediction" ? "active" : ""} onClick={() => setTab("prediction")}>预测</button>
           <button className={tab === "review" ? "active" : ""} onClick={() => setTab("review")}>策略回看</button>
           <button className={tab === "settings" ? "active" : ""} onClick={() => setTab("settings")}>设置</button>
         </nav>
@@ -190,6 +224,7 @@ export default function App() {
           periods={periods}
           autoRefreshSeconds={autoRefreshSeconds}
           onAutoRefreshSecondsChange={setAutoRefreshSeconds}
+          onPredict={() => setTab("prediction")}
         />
       )}
       {tab === "screener" && (
@@ -207,6 +242,15 @@ export default function App() {
         />
       )}
       {tab === "review" && <ReviewPage trades={trades} positions={positions} summary={summary} />}
+      {tab === "prediction" && (
+        <PredictionPage
+          selectedSymbol={selectedSymbol}
+          status={predictionStatus}
+          result={prediction}
+          onRun={runPrediction}
+          onOpenSettings={() => setTab("settings")}
+        />
+      )}
       {tab === "settings" && (
         <SettingsPage
           marketStatus={marketStatus}
@@ -215,6 +259,8 @@ export default function App() {
           screenerConfig={screenerConfig}
           screenerStatus={screenerStatus}
           onSaveScreenerSymbols={saveScreenerSymbols}
+          predictionStatus={predictionStatus}
+          onSavePredictionSettings={savePredictionSettings}
         />
       )}
     </div>
@@ -236,6 +282,7 @@ function HomePage(props: {
   periods: MarketPeriod[];
   autoRefreshSeconds: number;
   onAutoRefreshSecondsChange: (seconds: number) => void;
+  onPredict: () => void;
 }) {
   const selectedPosition = props.positions.find((position) => position.symbol === props.selectedSymbol);
   const symbolInputRef = useRef<HTMLInputElement>(null);
@@ -406,6 +453,7 @@ function HomePage(props: {
                 </select>
                 <button className="refresh-button" onClick={props.onRefreshMarket}>刷新行情</button>
                 <button className="refresh-button" onClick={() => setFullscreen(true)}>全屏</button>
+                <button className="refresh-button" onClick={props.onPredict}>去预测</button>
               </div>
             </div>
           </div>
@@ -775,6 +823,114 @@ function ReviewPage(props: { trades: TradeRecord[]; positions: Position[]; summa
   );
 }
 
+function PredictionPage(props: {
+  selectedSymbol: string;
+  status: PredictionStatus | null;
+  result: PredictionResult | null;
+  onRun: (symbol: string, horizon: number) => Promise<void>;
+  onOpenSettings: () => void;
+}) {
+  const [symbol, setSymbol] = useState(props.selectedSymbol);
+  const [horizon, setHorizon] = useState(20);
+  const activeResult = props.result?.symbol === symbol.trim() ? props.result : null;
+
+  useEffect(() => {
+    setSymbol(props.selectedSymbol);
+  }, [props.selectedSymbol]);
+
+  if (!props.status?.enabled) {
+    return (
+      <main className="prediction-grid">
+        <section className="panel prediction-empty">
+          <h2>预测功能未启用</h2>
+          <p>在设置中打开预测功能后，系统会自动安装 Kronos 模型和独立运行环境。安装完成后这里会显示 K 线预测。</p>
+          <button className="primary-action" onClick={props.onOpenSettings}>去设置开启</button>
+        </section>
+      </main>
+    );
+  }
+
+  if (!props.status.ready) {
+    return (
+      <main className="prediction-grid">
+        <section className="panel prediction-empty">
+          <h2>预测环境准备中</h2>
+          <p>当前状态：{props.status.install_status}。模型：{props.status.model_name}。</p>
+          <p>运行目录：{props.status.runtime_path}</p>
+          {props.status.last_error && <p>错误：{props.status.last_error}</p>}
+          <button className="primary-action" onClick={props.onOpenSettings}>查看设置</button>
+        </section>
+      </main>
+    );
+  }
+
+  return (
+    <main className="prediction-grid">
+      <section className="panel prediction-toolbar">
+        <label>
+          股票代码
+          <input value={symbol} onChange={(event) => setSymbol(event.target.value)} inputMode="numeric" />
+        </label>
+        <label>
+          预测天数
+          <select value={horizon} onChange={(event) => setHorizon(Number(event.target.value))}>
+            <option value={10}>10 日</option>
+            <option value={20}>20 日</option>
+            <option value={30}>30 日</option>
+            <option value={60}>60 日</option>
+          </select>
+        </label>
+        <button className="primary-action" disabled={!symbol.trim()} onClick={() => props.onRun(symbol.trim(), horizon)}>生成预测</button>
+        <MiniStat label="模型" value={props.status.model_name} />
+      </section>
+      {activeResult ? (
+        <>
+          <section className="metrics-grid">
+            <Metric label="预测股票" value={`${activeResult.name} ${activeResult.symbol}`} />
+            <Metric label="预测周期" value={`${activeResult.horizon} 日`} />
+            <Metric label="预期涨跌" value={`${activeResult.expected_change_pct >= 0 ? "+" : ""}${activeResult.expected_change_pct.toFixed(2)}%`} tone={activeResult.expected_change_pct >= 0 ? "up" : "down"} />
+            <Metric label="生成时间" value={new Date(activeResult.generated_at).toLocaleString("zh-CN", { hour12: false })} />
+            <Metric label="数据" value="历史 + 预测" />
+          </section>
+          <section className="panel chart-panel prediction-chart">
+            <KLineChart bars={[...activeResult.history, ...activeResult.forecast]} />
+          </section>
+          <section className="panel trade-table">
+            <div className="panel-title">
+              <div>
+                <h2>预测 K 线</h2>
+                <p>{activeResult.message}</p>
+              </div>
+            </div>
+            <table>
+              <thead>
+                <tr><th>日期</th><th>开盘</th><th>最高</th><th>最低</th><th>收盘</th><th>成交量</th></tr>
+              </thead>
+              <tbody>
+                {activeResult.forecast.map((bar) => (
+                  <tr key={bar.timestamp}>
+                    <td>{bar.trade_date}</td>
+                    <td>{bar.open.toFixed(2)}</td>
+                    <td>{bar.high.toFixed(2)}</td>
+                    <td>{bar.low.toFixed(2)}</td>
+                    <td>{bar.close.toFixed(2)}</td>
+                    <td>{bar.volume.toLocaleString("zh-CN", { maximumFractionDigits: 0 })}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </section>
+        </>
+      ) : (
+        <section className="panel prediction-empty">
+          <h2>等待生成预测</h2>
+          <p>选择股票和预测天数后点击“生成预测”。模型输出只用于辅助观察，不构成交易建议。</p>
+        </section>
+      )}
+    </main>
+  );
+}
+
 function SettingsPage(props: {
   marketStatus: MarketStatus | null;
   autoRefreshSeconds: number;
@@ -782,13 +938,23 @@ function SettingsPage(props: {
   screenerConfig: ScreenerConfig | null;
   screenerStatus: ScreenerStatus | null;
   onSaveScreenerSymbols: (symbols: string[]) => Promise<void>;
+  predictionStatus: PredictionStatus | null;
+  onSavePredictionSettings: (enabled: boolean, modelName: string) => Promise<PredictionStatus>;
 }) {
   const [symbolsText, setSymbolsText] = useState((props.screenerConfig?.symbols ?? []).join(", "));
+  const [predictionEnabled, setPredictionEnabled] = useState(Boolean(props.predictionStatus?.enabled));
+  const [predictionModel, setPredictionModel] = useState(props.predictionStatus?.model_name ?? "NeoQuasar/Kronos-small");
   const [settingsStatus, setSettingsStatus] = useState("");
+  const [predictionSettingsStatus, setPredictionSettingsStatus] = useState("");
 
   useEffect(() => {
     setSymbolsText((props.screenerConfig?.symbols ?? []).join(", "));
   }, [props.screenerConfig]);
+
+  useEffect(() => {
+    setPredictionEnabled(Boolean(props.predictionStatus?.enabled));
+    setPredictionModel(props.predictionStatus?.model_name ?? "NeoQuasar/Kronos-small");
+  }, [props.predictionStatus]);
 
   const saveSymbols = async () => {
     const symbols = symbolsText.split(/[\s,，]+/).map((symbol) => symbol.trim()).filter(Boolean);
@@ -797,6 +963,15 @@ function SettingsPage(props: {
       setSettingsStatus("股票池已保存并刷新。");
     } catch {
       setSettingsStatus("保存失败，请检查股票代码。");
+    }
+  };
+
+  const savePrediction = async () => {
+    try {
+      await props.onSavePredictionSettings(predictionEnabled, predictionModel);
+      setPredictionSettingsStatus(predictionEnabled ? "预测功能已启用，正在准备 Kronos 环境。" : "预测功能已关闭。");
+    } catch {
+      setPredictionSettingsStatus("预测设置保存失败。");
     }
   };
 
@@ -836,6 +1011,25 @@ function SettingsPage(props: {
         <MiniStat label="当前股票池" value={`${props.screenerStatus?.pool_size ?? 0} 只`} />
         <MiniStat label="最近耗时" value={props.screenerStatus?.last_duration_seconds == null ? "--" : `${props.screenerStatus.last_duration_seconds} 秒`} />
         {settingsStatus && <p>{settingsStatus}</p>}
+      </section>
+      <section className="panel settings-card">
+        <h2>预测功能</h2>
+        <label className="inline-setting">
+          <input type="checkbox" checked={predictionEnabled} onChange={(event) => setPredictionEnabled(event.target.checked)} />
+          启用 Kronos K 线预测
+        </label>
+        <label>
+          模型
+          <select value={predictionModel} onChange={(event) => setPredictionModel(event.target.value)}>
+            <option value="NeoQuasar/Kronos-small">Kronos-small</option>
+            <option value="NeoQuasar/Kronos-base">Kronos-base</option>
+          </select>
+        </label>
+        <button className="primary-action" onClick={savePrediction}>保存预测设置</button>
+        <MiniStat label="安装状态" value={props.predictionStatus?.install_status ?? "not_installed"} />
+        <MiniStat label="运行目录" value={props.predictionStatus?.runtime_path ?? "--"} />
+        {predictionSettingsStatus && <p>{predictionSettingsStatus}</p>}
+        {props.predictionStatus?.last_error && <p>{props.predictionStatus.last_error}</p>}
       </section>
     </main>
   );

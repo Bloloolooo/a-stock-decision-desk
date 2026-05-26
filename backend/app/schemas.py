@@ -133,3 +133,35 @@ class ScreenerStatus(BaseModel):
     last_duration_seconds: float | None = None
     last_error_count: int = 0
     symbols: list[str]
+
+
+class PredictionSettings(BaseModel):
+    enabled: bool
+    model_name: str
+    tokenizer_name: str
+    install_status: str
+    last_error: str | None = None
+    installed_at: datetime | None = None
+    updated_at: datetime
+
+
+class PredictionSettingsUpdate(BaseModel):
+    enabled: bool
+    model_name: str = "NeoQuasar/Kronos-small"
+
+
+class PredictionStatus(PredictionSettings):
+    runtime_path: str
+    ready: bool
+
+
+class PredictionResult(BaseModel):
+    symbol: str
+    name: str
+    model_name: str
+    horizon: int
+    history: list[PriceBar]
+    forecast: list[PriceBar]
+    expected_change_pct: float
+    generated_at: datetime
+    message: str

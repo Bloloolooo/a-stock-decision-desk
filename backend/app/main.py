@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.db import init_db
-from app.routers import market, portfolio, risk, screener
+from app.routers import market, portfolio, prediction, risk, screener
 
 app = FastAPI(title="A Stock Decision Desk", version="0.1.0")
 
@@ -18,6 +18,7 @@ app.include_router(portfolio.router, prefix="/api/portfolio", tags=["portfolio"]
 app.include_router(market.router, prefix="/api/market", tags=["market"])
 app.include_router(risk.router, prefix="/api/risk", tags=["risk"])
 app.include_router(screener.router, prefix="/api/screener", tags=["screener"])
+app.include_router(prediction.router, prefix="/api/prediction", tags=["prediction"])
 
 
 @app.on_event("startup")

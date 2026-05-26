@@ -121,3 +121,27 @@ export type ScreenerStatus = {
   last_error_count: number;
   symbols: string[];
 };
+
+export type PredictionStatus = {
+  enabled: boolean;
+  model_name: string;
+  tokenizer_name: string;
+  install_status: "not_installed" | "installing" | "ready" | "failed" | string;
+  last_error?: string | null;
+  installed_at?: string | null;
+  updated_at: string;
+  runtime_path: string;
+  ready: boolean;
+};
+
+export type PredictionResult = {
+  symbol: string;
+  name: string;
+  model_name: string;
+  horizon: number;
+  history: PriceBar[];
+  forecast: PriceBar[];
+  expected_change_pct: number;
+  generated_at: string;
+  message: string;
+};
