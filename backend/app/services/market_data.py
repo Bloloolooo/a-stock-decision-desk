@@ -12,6 +12,10 @@ from app.db import get_connection, init_db
 from app.schemas import MarketPeriod, MarketSettings, MarketStatus, PriceBar, StockInfo
 
 
+def _price(value: object) -> float:
+    return round(float(value), 2)
+
+
 class MarketDataProvider(Protocol):
     provider_name: str
     description: str
@@ -54,7 +58,7 @@ class SampleMarketDataProvider:
         return self.base_prices.get(symbol, 32.8)
 
     def name(self, symbol: str) -> str:
-        return self.names.get(symbol, f"股票 {symbol}")
+        return self.names.get(symbol, "")
 
     def bars(self, symbol: str, period: str = "daily", adjust: str = "qfq") -> list[PriceBar]:
         today = date.today()
@@ -128,8 +132,32 @@ class AkShareMarketDataProvider:
                     self._name_cache[code] = name
         except Exception:
             self.last_source = "sample"
-            return self.fallback.name(symbol)
+        if symbol not in self._name_cache:
+            sina_name = self._fetch_sina_name(symbol)
+            if sina_name:
+                self._name_cache[symbol] = sina_name
         return self._name_cache.get(symbol, self.fallback.name(symbol))
+
+    def _fetch_sina_name(self, symbol: str) -> str:
+        market_symbol = self._sina_symbol(symbol)
+        url = f"https://hq.sinajs.cn/list={market_symbol}"
+        request = Request(
+            url,
+            headers={
+                "User-Agent": "Mozilla/5.0",
+                "Referer": "https://finance.sina.com.cn",
+            },
+        )
+        try:
+            with urlopen(request, timeout=5) as response:
+                payload = response.read().decode("gbk", errors="ignore")
+        except Exception:
+            return ""
+        match = re.search(r'="([^,"]+),', payload)
+        if not match:
+            return ""
+        name = match.group(1).strip()
+        return "" if not name or name == market_symbol else name
 
     def bars(self, symbol: str, period: str = "daily", adjust: str = "qfq") -> list[PriceBar]:
         cache_key = (symbol, period, adjust)
@@ -190,10 +218,10 @@ class AkShareMarketDataProvider:
                     period=period,
                     trade_date=row["日期"],
                     timestamp=str(row["日期"]),
-                    open=float(row["开盘"]),
-                    high=float(row["最高"]),
-                    low=float(row["最低"]),
-                    close=float(row["收盘"]),
+                    open=_price(row["开盘"]),
+                    high=_price(row["最高"]),
+                    low=_price(row["最低"]),
+                    close=_price(row["收盘"]),
                     volume=float(row.get("成交量", 0)),
                     amount=float(row.get("成交额", 0)),
                     turnover_rate=float(row["换手率"]) if row.get("换手率") not in (None, "") else None,
@@ -234,10 +262,10 @@ class AkShareMarketDataProvider:
                     period=period,
                     trade_date=timestamp.split(" ")[0],
                     timestamp=timestamp,
-                    open=float(row["open"]),
-                    high=float(row["high"]),
-                    low=float(row["low"]),
-                    close=close,
+                    open=_price(row["open"]),
+                    high=_price(row["high"]),
+                    low=_price(row["low"]),
+                    close=_price(close),
                     volume=volume,
                     amount=float(row.get("amount", volume * close)),
                     turnover_rate=None,
@@ -290,10 +318,10 @@ class AkShareMarketDataProvider:
                     period=period,
                     trade_date=timestamp.split(" ")[0],
                     timestamp=timestamp,
-                    open=float(row["open"]),
-                    high=float(row["high"]),
-                    low=float(row["low"]),
-                    close=close,
+                    open=_price(row["open"]),
+                    high=_price(row["high"]),
+                    low=_price(row["low"]),
+                    close=_price(close),
                     volume=volume,
                     amount=round(volume * close, 2),
                     turnover_rate=None,
@@ -328,10 +356,10 @@ class AkShareMarketDataProvider:
                     period=period,
                     trade_date=last.trade_date,
                     timestamp=last.trade_date.isoformat(),
-                    open=first.open,
-                    high=max(bar.high for bar in group),
-                    low=min(bar.low for bar in group),
-                    close=last.close,
+                    open=_price(first.open),
+                    high=_price(max(bar.high for bar in group)),
+                    low=_price(min(bar.low for bar in group)),
+                    close=_price(last.close),
                     volume=round(volume, 2),
                     amount=round(amount, 2),
                     turnover_rate=None,
@@ -412,10 +440,10 @@ class TushareMarketDataProvider(AkShareMarketDataProvider):
                         period=period,
                         trade_date=trade_date,
                         timestamp=trade_date.isoformat(),
-                        open=float(row["open"]),
-                        high=float(row["high"]),
-                        low=float(row["low"]),
-                        close=close,
+                        open=_price(row["open"]),
+                        high=_price(row["high"]),
+                        low=_price(row["low"]),
+                        close=_price(close),
                         volume=volume,
                         amount=float(row.get("amount", 0)) * 1000,
                         turnover_rate=None,
@@ -456,10 +484,10 @@ class TushareMarketDataProvider(AkShareMarketDataProvider):
                     period=period,
                     trade_date=last.trade_date,
                     timestamp=last.trade_date.isoformat(),
-                    open=first.open,
-                    high=max(bar.high for bar in group),
-                    low=min(bar.low for bar in group),
-                    close=last.close,
+                    open=_price(first.open),
+                    high=_price(max(bar.high for bar in group)),
+                    low=_price(min(bar.low for bar in group)),
+                    close=_price(last.close),
                     volume=sum(bar.volume for bar in group),
                     amount=sum(bar.amount for bar in group),
                     turnover_rate=None,
@@ -507,10 +535,10 @@ class EfinanceMarketDataProvider(AkShareMarketDataProvider):
                         period=period,
                         trade_date=trade_date,
                         timestamp=trade_date.isoformat(),
-                        open=float(row["开盘"]),
-                        high=float(row["最高"]),
-                        low=float(row["最低"]),
-                        close=float(row["收盘"]),
+                        open=_price(row["开盘"]),
+                        high=_price(row["最高"]),
+                        low=_price(row["最低"]),
+                        close=_price(row["收盘"]),
                         volume=float(row.get("成交量", 0)),
                         amount=float(row.get("成交额", 0)),
                         turnover_rate=float(row["换手率"]) if row.get("换手率") not in (None, "") else None,
@@ -587,10 +615,10 @@ class BaoStockMarketDataProvider(AkShareMarketDataProvider):
                         period=period,
                         trade_date=trade_date,
                         timestamp=trade_date.isoformat(),
-                        open=float(row[2]),
-                        high=float(row[3]),
-                        low=float(row[4]),
-                        close=close,
+                        open=_price(row[2]),
+                        high=_price(row[3]),
+                        low=_price(row[4]),
+                        close=_price(close),
                         volume=volume,
                         amount=float(row[7] or 0),
                         turnover_rate=float(row[8]) if row[8] not in (None, "") else None,
@@ -656,10 +684,10 @@ class TencentMarketDataProvider(AkShareMarketDataProvider):
                         period=period,
                         trade_date=trade_date,
                         timestamp=trade_date.isoformat(),
-                        open=float(row[1]),
-                        high=float(row[3]),
-                        low=float(row[4]),
-                        close=close,
+                        open=_price(row[1]),
+                        high=_price(row[3]),
+                        low=_price(row[4]),
+                        close=_price(close),
                         volume=volume,
                         amount=round(volume * close, 2),
                         turnover_rate=None,
@@ -742,7 +770,22 @@ class MarketDataManager:
         return self._call("latest_price", symbol)
 
     def name(self, symbol: str) -> str:
-        return self._call("name", symbol)
+        normalized = symbol.strip()
+        provider = self._provider()
+        candidates: list[MarketDataProvider] = [provider]
+        for fallback in [self.akshare, self.sina, self.efinance, self.tencent, self.baostock, self.sample]:
+            if fallback not in candidates:
+                candidates.append(fallback)
+        for candidate in candidates:
+            try:
+                name = candidate.name(normalized).strip()
+            except Exception:
+                continue
+            if name and not name.startswith("股票"):
+                self._sync_status(candidate)
+                return name
+        self._sync_status(provider)
+        return f"股票 {normalized}"
 
     def bars(self, symbol: str, period: str = "daily", adjust: str = "qfq") -> list[PriceBar]:
         return self._call("bars", symbol, period, adjust)

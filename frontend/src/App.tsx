@@ -638,6 +638,8 @@ function formatChartDate(bar: PriceBar) {
   return bar.timestamp.includes(" ") ? bar.timestamp.slice(0, 16) : bar.trade_date;
 }
 
+const priceFormat = { type: "price" as const, precision: 2, minMove: 0.01 };
+
 function movingAverage(values: number[], window: number) {
   return values.map((_, index) => {
     if (index + 1 < window) return null;
@@ -1013,10 +1015,10 @@ function KLineChart({ bars, mode = "normal" }: { bars: PriceBar[]; mode?: "norma
             height: container.clientHeight,
           });
           if (isMinuteChart) {
-            const lineSeries = chart.addLineSeries({ color: "#69a8ff", lineWidth: 2, priceScaleId: "right" });
+            const lineSeries = chart.addLineSeries({ color: "#69a8ff", lineWidth: 2, priceScaleId: "right", priceFormat });
             lineSeries.setData(lineData);
             if (mainChart === "standard") {
-              const vwapSeries = chart.addLineSeries({ color: "#f0c04f", lineWidth: 1, priceScaleId: "right" });
+              const vwapSeries = chart.addLineSeries({ color: "#f0c04f", lineWidth: 1, priceScaleId: "right", priceFormat });
               vwapSeries.setData(vwapData);
             }
           }
@@ -1029,21 +1031,22 @@ function KLineChart({ bars, mode = "normal" }: { bars: PriceBar[]; mode?: "norma
               wickUpColor: "#d94b42",
               wickDownColor: "#14a06f",
               priceScaleId: "right",
+              priceFormat,
             });
             candleSeries.setData(chartData);
             if (mainChart === "standard") {
               const maColors: Record<number, string> = { 5: "#f4d35e", 10: "#8ecae6", 20: "#c084fc", 60: "#f59e0b" };
               maData.forEach((ma) => {
-                const series = chart.addLineSeries({ color: maColors[ma.window], lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
+                const series = chart.addLineSeries({ color: maColors[ma.window], lineWidth: 1, priceFormat, priceLineVisible: false, lastValueVisible: false });
                 series.setData(ma.data);
               });
             }
           }
           if (mainChart === "boll" || mainChart === "bbiboll") {
             const activeBand = mainChart === "boll" ? bollData : bbiBollData;
-            const upperSeries = chart.addLineSeries({ color: "#f0b84f", lineWidth: 1, lineStyle: LineStyle.Dashed, priceLineVisible: false, lastValueVisible: false });
-            const middleSeries = chart.addLineSeries({ color: "#8ecae6", lineWidth: 2, priceLineVisible: false, lastValueVisible: false });
-            const lowerSeries = chart.addLineSeries({ color: "#f0b84f", lineWidth: 1, lineStyle: LineStyle.Dashed, priceLineVisible: false, lastValueVisible: false });
+            const upperSeries = chart.addLineSeries({ color: "#f0b84f", lineWidth: 1, lineStyle: LineStyle.Dashed, priceFormat, priceLineVisible: false, lastValueVisible: false });
+            const middleSeries = chart.addLineSeries({ color: "#8ecae6", lineWidth: 2, priceFormat, priceLineVisible: false, lastValueVisible: false });
+            const lowerSeries = chart.addLineSeries({ color: "#f0b84f", lineWidth: 1, lineStyle: LineStyle.Dashed, priceFormat, priceLineVisible: false, lastValueVisible: false });
             upperSeries.setData(activeBand.upper);
             middleSeries.setData(activeBand.middle);
             lowerSeries.setData(activeBand.lower);
