@@ -136,6 +136,17 @@ export default function App() {
       });
   };
 
+  const renamePosition = (symbol: string, name: string) => {
+    setStatus("更新股票标签名中");
+    return api.updatePositionName(symbol, name)
+      .then(() => reloadPortfolio())
+      .then(() => setStatus("股票标签名已更新"))
+      .catch((error) => {
+        setStatus("股票标签名更新失败");
+        throw error;
+      });
+  };
+
   const reloadPredictionStatus = () => api.predictionStatus().then(setPredictionStatus);
 
   const saveMarketSettings = (provider: string, tushareToken: string) => {
@@ -242,6 +253,7 @@ export default function App() {
           onSelectSymbol={setSelectedSymbol}
           onPeriodChange={setPeriod}
           onPortfolioChange={reloadPortfolio}
+          onRenamePosition={renamePosition}
           onRefreshMarket={reloadMarket}
           marketStatus={marketStatus}
           periods={periods}
@@ -303,6 +315,7 @@ function HomePage(props: {
   onSelectSymbol: (symbol: string) => void;
   onPeriodChange: (period: string) => void;
   onPortfolioChange: () => Promise<void>;
+  onRenamePosition: (symbol: string, name: string) => Promise<void>;
   onRefreshMarket: () => Promise<void>;
   marketStatus: MarketStatus | null;
   periods: MarketPeriod[];
@@ -412,6 +425,17 @@ function HomePage(props: {
     props.onSelectSymbol(symbol);
   };
 
+  const renamePosition = async (position: Position) => {
+    const name = window.prompt(`修改 ${position.symbol} 的标签名`, position.name)?.trim();
+    if (!name || name === position.name) return;
+    try {
+      await props.onRenamePosition(position.symbol, name);
+      setFormStatus("标签名已更新");
+    } catch (error) {
+      setFormStatus(error instanceof Error ? error.message : "标签名更新失败。");
+    }
+  };
+
   return (
     <>
       <section className="metrics-grid">
@@ -430,19 +454,19 @@ function HomePage(props: {
           </div>
           <div className="stock-list">
             {props.positions.map((position) => (
-              <button
+              <div
                 key={position.symbol}
                 className={`stock-row ${props.selectedSymbol === position.symbol ? "selected" : ""}`}
-                onClick={() => props.onSelectSymbol(position.symbol)}
               >
-                <span>
+                <button className="stock-select" onClick={() => props.onSelectSymbol(position.symbol)}>
                   <strong>{position.name}</strong>
                   <small>{position.symbol} · 持 {position.quantity} 股</small>
-                </span>
+                </button>
                 <span className={position.floating_pnl >= 0 ? "up" : "down"}>
                   {pct(position.floating_pnl_pct)}
                 </span>
-              </button>
+                <button className="rename-button" onClick={() => renamePosition(position)}>改名</button>
+              </div>
             ))}
           </div>
           <div className="entry-form">
@@ -490,7 +514,7 @@ function HomePage(props: {
         </aside>
 
         <section className="panel chart-panel">
-          <StockTabs positions={props.positions} selectedSymbol={props.selectedSymbol} onSelectSymbol={props.onSelectSymbol} />
+          <StockTabs positions={props.positions} selectedSymbol={props.selectedSymbol} onSelectSymbol={props.onSelectSymbol} onRenamePosition={renamePosition} />
           <div className="chart-header">
             <div>
               <h2>{props.risk?.name ?? selectedPosition?.name ?? props.selectedSymbol} <span>{props.selectedSymbol}</span></h2>
@@ -565,7 +589,7 @@ function HomePage(props: {
       {fullscreen && (
         <div className="fullscreen-chart" role="dialog" aria-modal="true">
           <div className="fullscreen-top">
-            <StockTabs positions={props.positions} selectedSymbol={props.selectedSymbol} onSelectSymbol={props.onSelectSymbol} />
+            <StockTabs positions={props.positions} selectedSymbol={props.selectedSymbol} onSelectSymbol={props.onSelectSymbol} onRenamePosition={renamePosition} />
             <button className="close-button" onClick={() => setFullscreen(false)} title="Esc">退出全屏</button>
           </div>
           <div className="fullscreen-toolbar">
@@ -589,7 +613,12 @@ function HomePage(props: {
   );
 }
 
-function StockTabs(props: { positions: Position[]; selectedSymbol: string; onSelectSymbol: (symbol: string) => void }) {
+function StockTabs(props: {
+  positions: Position[];
+  selectedSymbol: string;
+  onSelectSymbol: (symbol: string) => void;
+  onRenamePosition: (position: Position) => void;
+}) {
   const hasSelectedPosition = props.positions.some((position) => position.symbol === props.selectedSymbol);
   return (
     <div className="stock-tabs">
@@ -600,14 +629,16 @@ function StockTabs(props: { positions: Position[]; selectedSymbol: string; onSel
         </button>
       )}
       {props.positions.map((position) => (
-        <button
+        <div
           key={position.symbol}
-          className={props.selectedSymbol === position.symbol ? "active" : ""}
-          onClick={() => props.onSelectSymbol(position.symbol)}
+          className={`stock-tab ${props.selectedSymbol === position.symbol ? "active" : ""}`}
         >
-          <span>{position.name}</span>
-          <small>{position.symbol}</small>
-        </button>
+          <button className="stock-tab-main" onClick={() => props.onSelectSymbol(position.symbol)}>
+            <span>{position.name}</span>
+            <small>{position.symbol}</small>
+          </button>
+          <button className="stock-tab-rename" onClick={() => props.onRenamePosition(position)}>改名</button>
+        </div>
       ))}
     </div>
   );

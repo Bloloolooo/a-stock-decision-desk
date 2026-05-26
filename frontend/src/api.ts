@@ -44,12 +44,25 @@ async function putJson<T>(path: string, payload: unknown): Promise<T> {
   return response.json();
 }
 
+async function patchJson<T>(path: string, payload: unknown): Promise<T> {
+  const response = await fetch(`${API_BASE}${path}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    throw await requestError(response);
+  }
+  return response.json();
+}
+
 export const api = {
   summary: () => getJson<PortfolioSummary>("/portfolio/summary"),
   positions: () => getJson<Position[]>("/portfolio/positions"),
   trades: () => getJson<TradeRecord[]>("/portfolio/trades"),
   updateCash: (cash: number) => postJson<PortfolioSummary>("/portfolio/cash", { cash }),
   upsertPosition: (position: PositionInput) => postJson<Position>("/portfolio/positions", position),
+  updatePositionName: (symbol: string, name: string) => patchJson<Position>(`/portfolio/positions/${symbol}/name`, { name }),
   sellPosition: (position: SellInput) => postJson<PortfolioSummary>("/portfolio/sell", position),
   marketStatus: () => getJson<MarketStatus>("/market/status"),
   marketSettings: () => getJson<MarketSettings>("/market/settings"),

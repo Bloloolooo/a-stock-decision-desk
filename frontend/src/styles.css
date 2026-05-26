@@ -194,14 +194,33 @@ button {
 
 .stock-row {
   width: 100%;
-  display: flex;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: 1fr auto;
   gap: 8px;
   padding: 10px;
   border: 1px solid #d8e1ec;
   border-radius: 7px;
   background: #fbfdff;
   text-align: left;
+}
+
+.stock-select {
+  min-width: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+
+.rename-button {
+  grid-column: 2;
+  justify-self: end;
+  border-radius: 4px;
+  padding: 3px 6px;
+  background: #eef4fb;
+  color: #1f4f8f;
+  font-size: 11px;
+  font-weight: 800;
 }
 
 .stock-row.selected {
@@ -297,24 +316,60 @@ td small {
   background: #f7fafc;
 }
 
-.stock-tabs button {
+.stock-tabs > button,
+.stock-tab {
   min-width: 92px;
   border: 1px solid #ccd8e6;
   border-radius: 6px;
-  padding: 6px 9px;
   background: #fff;
   color: #405064;
-  cursor: pointer;
   text-align: left;
 }
 
-.stock-tabs button span,
-.stock-tabs button small {
+.stock-tabs > button {
+  padding: 6px 9px;
+  cursor: pointer;
+}
+
+.stock-tab {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: stretch;
+  overflow: hidden;
+}
+
+.stock-tab-main,
+.stock-tab-rename {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.stock-tab-main {
+  min-width: 0;
+  padding: 6px 9px;
+  text-align: left;
+}
+
+.stock-tab-rename {
+  padding: 0 7px;
+  border-left: 1px solid #e3ebf4;
+  color: #1f4f8f;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.stock-tabs > button span,
+.stock-tabs > button small,
+.stock-tab span,
+.stock-tab small {
   display: block;
   line-height: 1.2;
 }
 
-.stock-tabs button small {
+.stock-tabs > button small,
+.stock-tab small {
   margin-top: 2px;
   color: #68758a;
   font-size: 10px;

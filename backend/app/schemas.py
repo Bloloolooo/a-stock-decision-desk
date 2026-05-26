@@ -19,6 +19,10 @@ class PositionSell(BaseModel):
     note: str = ""
 
 
+class PositionNameUpdate(BaseModel):
+    name: str = Field(min_length=1, max_length=32)
+
+
 class TradeRecord(BaseModel):
     id: int
     symbol: str

@@ -140,6 +140,31 @@ class PortfolioService:
                 (symbol, row["name"], payload.quantity, payload.sell_price, amount, payload.note),
             )
 
+    def update_position_name(self, symbol: str, name: str) -> Position:
+        normalized_symbol = symbol.strip()
+        normalized_name = name.strip()
+        if not normalized_name:
+            raise ValueError("名称不能为空")
+        with get_connection() as connection:
+            row = connection.execute(
+                "SELECT symbol, name, quantity, average_cost, note FROM positions WHERE symbol = ?",
+                (normalized_symbol,),
+            ).fetchone()
+            if not row:
+                raise ValueError(f"{normalized_symbol} 没有持仓")
+            connection.execute(
+                "UPDATE positions SET name = ?, updated_at = datetime('now') WHERE symbol = ?",
+                (normalized_name, normalized_symbol),
+            )
+            updated = PositionCreate(
+                symbol=row["symbol"],
+                name=normalized_name,
+                quantity=int(row["quantity"]),
+                average_cost=float(row["average_cost"]),
+                note=row["note"],
+            )
+        return self._position_view(updated)
+
     def positions(self) -> list[Position]:
         with get_connection() as connection:
             rows = connection.execute(

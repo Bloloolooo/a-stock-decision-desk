@@ -4,6 +4,15 @@ import app.services.portfolio as portfolio_module
 from app.services.portfolio import PortfolioService
 
 
+def test_new_database_starts_with_empty_portfolio(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("STOCK_TOOL_DB_PATH", str(tmp_path / "test.sqlite3"))
+    monkeypatch.setattr(portfolio_module, "market_data", sample_market_data)
+    service = PortfolioService()
+
+    assert service.positions() == []
+    assert service.summary().cash == 0
+
+
 def test_portfolio_persists_cash_and_position(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("STOCK_TOOL_DB_PATH", str(tmp_path / "test.sqlite3"))
     monkeypatch.setattr(portfolio_module, "market_data", sample_market_data)
@@ -32,6 +41,19 @@ def test_portfolio_resolves_missing_name(monkeypatch, tmp_path) -> None:
     )
 
     assert position.name == "中际旭创"
+
+
+def test_update_position_name_changes_label(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("STOCK_TOOL_DB_PATH", str(tmp_path / "test.sqlite3"))
+    monkeypatch.setattr(portfolio_module, "market_data", sample_market_data)
+    service = PortfolioService()
+    service.set_cash(20000)
+    service.upsert_position(PositionCreate(symbol="300308", quantity=100, average_cost=150))
+
+    position = service.update_position_name("300308", "自定义标签")
+
+    assert position.name == "自定义标签"
+    assert service.positions()[0].name == "自定义标签"
 
 
 def test_buy_position_appends_quantity_and_weighted_cost(monkeypatch, tmp_path) -> None:

@@ -92,15 +92,7 @@ def init_db() -> None:
         connection.execute(
             """
             INSERT OR IGNORE INTO account (id, cash, updated_at)
-            VALUES (1, 92180.0, datetime('now'))
-            """
-        )
-        connection.execute(
-            """
-            INSERT OR IGNORE INTO positions (symbol, name, quantity, average_cost, note, updated_at)
-            VALUES
-                ('300308', '中际旭创', 600, 151.55, '', datetime('now')),
-                ('300750', '宁德时代', 300, 205.44, '', datetime('now'))
+            VALUES (1, 0.0, datetime('now'))
             """
         )
         connection.execute(
