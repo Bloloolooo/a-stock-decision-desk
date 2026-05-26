@@ -409,14 +409,70 @@ td small {
   cursor: pointer;
 }
 
+.pro-chart {
+  position: relative;
+  min-height: 430px;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  background: #0f1724;
+}
+
+.pro-chart[data-mode="fullscreen"] {
+  min-height: 0;
+  height: calc(100vh - 132px);
+}
+
 .chart-canvas {
   min-height: 430px;
   background: #0f1724;
 }
 
+.pro-chart[data-mode="fullscreen"] .chart-canvas,
 .chart-canvas[data-mode="fullscreen"] {
   min-height: 0;
-  height: calc(100vh - 132px);
+  height: 100%;
+}
+
+.chart-tooltip {
+  min-height: 32px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  padding: 7px 10px;
+  border-bottom: 1px solid #1f2d43;
+  background: #101a2a;
+  color: #bac7d8;
+  font-size: 12px;
+}
+
+.chart-tooltip strong {
+  color: #eef5ff;
+}
+
+.chart-legend {
+  min-height: 30px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  padding: 6px 10px;
+  border-top: 1px solid #1f2d43;
+  background: #101a2a;
+  color: #9aa8bd;
+  font-size: 12px;
+}
+
+.chart-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.chart-legend i {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
 }
 
 .fullscreen-chart {

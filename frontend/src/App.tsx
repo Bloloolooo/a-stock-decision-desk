@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
-import { createChart, ColorType, type IChartApi, type UTCTimestamp } from "lightweight-charts";
+import { createChart, ColorType, LineStyle, type IChartApi, type UTCTimestamp } from "lightweight-charts";
 
 import { api } from "./api";
 import type { DecisionCenter, MarketPeriod, MarketSettings, MarketStatus, PortfolioSummary, Position, PredictionResult, PredictionStatus, PriceBar, RiskAdvice, ScreenerConfig, ScreenerResult, ScreenerStatus, TradeRecord } from "./types";
@@ -584,7 +584,43 @@ function chinaMarketTime(bar: PriceBar): UTCTimestamp | string {
   ) as UTCTimestamp;
 }
 
+function formatChartDate(bar: PriceBar) {
+  return bar.timestamp.includes(" ") ? bar.timestamp.slice(0, 16) : bar.trade_date;
+}
+
+function movingAverage(values: number[], window: number) {
+  return values.map((_, index) => {
+    if (index + 1 < window) return null;
+    const scoped = values.slice(index + 1 - window, index + 1);
+    return scoped.reduce((sum, value) => sum + value, 0) / window;
+  });
+}
+
+function ema(values: number[], span: number) {
+  if (values.length === 0) return [];
+  const alpha = 2 / (span + 1);
+  const result = [values[0]];
+  for (let index = 1; index < values.length; index += 1) {
+    result.push(values[index] * alpha + result[index - 1] * (1 - alpha));
+  }
+  return result;
+}
+
+function chartMacd(values: number[]) {
+  const ema12 = ema(values, 12);
+  const ema26 = ema(values, 26);
+  const dif = values.map((_, index) => ema12[index] - ema26[index]);
+  const dea = ema(dif, 9);
+  return values.map((_, index) => ({
+    dif: dif[index],
+    dea: dea[index],
+    histogram: (dif[index] - dea[index]) * 2,
+  }));
+}
+
 function KLineChart({ bars, mode = "normal" }: { bars: PriceBar[]; mode?: "normal" | "fullscreen" }) {
+  const tooltipRef = useRef<HTMLDivElement | null>(null);
+  const isMinuteChart = bars.some((bar) => bar.timestamp.includes(" "));
   const chartData = useMemo(
     () => bars.map((bar) => ({
       time: chinaMarketTime(bar),
@@ -592,38 +628,166 @@ function KLineChart({ bars, mode = "normal" }: { bars: PriceBar[]; mode?: "norma
       high: bar.high,
       low: bar.low,
       close: bar.close,
+      volume: bar.volume,
+      amount: bar.amount,
+      raw: bar,
     })),
     [bars],
   );
+  const lineData = useMemo(
+    () => chartData.map((item) => ({ time: item.time, value: item.close })),
+    [chartData],
+  );
+  const vwapData = useMemo(() => {
+    let amount = 0;
+    let volume = 0;
+    return chartData.map((item) => {
+      amount += item.amount;
+      volume += item.volume;
+      return { time: item.time, value: volume ? amount / volume : item.close };
+    });
+  }, [chartData]);
+  const volumeData = useMemo(
+    () => chartData.map((item) => ({
+      time: item.time,
+      value: item.volume,
+      color: item.close >= item.open ? "rgba(218, 63, 55, 0.58)" : "rgba(22, 137, 98, 0.58)",
+    })),
+    [chartData],
+  );
+  const maData = useMemo(() => {
+    const closes = chartData.map((item) => item.close);
+    return [5, 10, 20, 60].map((window) => ({
+      window,
+      data: movingAverage(closes, window)
+        .map((value, index) => value == null ? null : { time: chartData[index].time, value })
+        .filter((item): item is { time: UTCTimestamp | string; value: number } => item !== null),
+    }));
+  }, [chartData]);
+  const macdData = useMemo(() => {
+    const points = chartMacd(chartData.map((item) => item.close));
+    return {
+      dif: points.map((point, index) => ({ time: chartData[index].time, value: point.dif })),
+      dea: points.map((point, index) => ({ time: chartData[index].time, value: point.dea })),
+      histogram: points.map((point, index) => ({
+        time: chartData[index].time,
+        value: point.histogram,
+        color: point.histogram >= 0 ? "rgba(218, 63, 55, 0.7)" : "rgba(22, 137, 98, 0.7)",
+      })),
+    };
+  }, [chartData]);
 
   return (
-    <div
-      className="chart-canvas"
-      data-mode={mode}
-      ref={(container) => {
-        if (!container || chartData.length === 0) return;
-        container.replaceChildren();
-        const chart: IChartApi = createChart(container, {
-          layout: { background: { type: ColorType.Solid, color: "#0f1724" }, textColor: "#9aa8bd" },
-          grid: { vertLines: { color: "#1c2940" }, horzLines: { color: "#1c2940" } },
-          rightPriceScale: { borderColor: "#253145" },
-          timeScale: { borderColor: "#253145", timeVisible: true },
-          crosshair: { mode: 1 },
-          width: container.clientWidth,
-          height: container.clientHeight,
-        });
-        const candleSeries = chart.addCandlestickSeries({
-          upColor: "#d94b42",
-          downColor: "#14a06f",
-          borderUpColor: "#d94b42",
-          borderDownColor: "#14a06f",
-          wickUpColor: "#d94b42",
-          wickDownColor: "#14a06f",
-        });
-        candleSeries.setData(chartData);
-        chart.timeScale().fitContent();
-      }}
-    />
+    <div className="pro-chart" data-mode={mode}>
+      <div className="chart-tooltip" ref={tooltipRef}>
+        {chartData[chartData.length - 1] ? (
+          <>
+            <strong>{formatChartDate(chartData[chartData.length - 1].raw)}</strong>
+            <span>开 {chartData[chartData.length - 1].open.toFixed(2)}</span>
+            <span>高 {chartData[chartData.length - 1].high.toFixed(2)}</span>
+            <span>低 {chartData[chartData.length - 1].low.toFixed(2)}</span>
+            <span>收 {chartData[chartData.length - 1].close.toFixed(2)}</span>
+            <span>量 {chartData[chartData.length - 1].volume.toLocaleString("zh-CN", { maximumFractionDigits: 0 })}</span>
+          </>
+        ) : <span>暂无行情</span>}
+      </div>
+      <div
+        className="chart-canvas"
+        data-mode={mode}
+        ref={(container) => {
+          if (!container || chartData.length === 0) return;
+          container.replaceChildren();
+          const chart: IChartApi = createChart(container, {
+            layout: { background: { type: ColorType.Solid, color: "#0f1724" }, textColor: "#9aa8bd" },
+            grid: { vertLines: { color: "#1c2940" }, horzLines: { color: "#1c2940" } },
+            rightPriceScale: { borderColor: "#253145", scaleMargins: { top: 0.06, bottom: 0.36 } },
+            timeScale: { borderColor: "#253145", timeVisible: true, secondsVisible: false },
+            crosshair: { mode: 1, vertLine: { color: "#50647f", style: LineStyle.Dashed }, horzLine: { color: "#50647f", style: LineStyle.Dashed } },
+            width: container.clientWidth,
+            height: container.clientHeight,
+          });
+          if (isMinuteChart) {
+            const lineSeries = chart.addLineSeries({ color: "#69a8ff", lineWidth: 2, priceScaleId: "right" });
+            lineSeries.setData(lineData);
+            const vwapSeries = chart.addLineSeries({ color: "#f0c04f", lineWidth: 1, priceScaleId: "right" });
+            vwapSeries.setData(vwapData);
+          } else {
+            const candleSeries = chart.addCandlestickSeries({
+              upColor: "#d94b42",
+              downColor: "#14a06f",
+              borderUpColor: "#d94b42",
+              borderDownColor: "#14a06f",
+              wickUpColor: "#d94b42",
+              wickDownColor: "#14a06f",
+              priceScaleId: "right",
+            });
+            candleSeries.setData(chartData);
+            const maColors: Record<number, string> = { 5: "#f4d35e", 10: "#8ecae6", 20: "#c084fc", 60: "#f59e0b" };
+            maData.forEach((ma) => {
+              const series = chart.addLineSeries({ color: maColors[ma.window], lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
+              series.setData(ma.data);
+            });
+          }
+          const volumeSeries = chart.addHistogramSeries({
+            priceFormat: { type: "volume" },
+            priceScaleId: "volume",
+            lastValueVisible: false,
+            priceLineVisible: false,
+          });
+          chart.priceScale("volume").applyOptions({ scaleMargins: { top: 0.68, bottom: 0.18 } });
+          volumeSeries.setData(volumeData);
+          if (!isMinuteChart) {
+            const macdHistogram = chart.addHistogramSeries({
+              priceScaleId: "macd",
+              lastValueVisible: false,
+              priceLineVisible: false,
+            });
+            chart.priceScale("macd").applyOptions({ scaleMargins: { top: 0.84, bottom: 0.02 } });
+            macdHistogram.setData(macdData.histogram);
+            const difSeries = chart.addLineSeries({ color: "#4ea4ff", lineWidth: 1, priceScaleId: "macd", lastValueVisible: false, priceLineVisible: false });
+            const deaSeries = chart.addLineSeries({ color: "#f0b84f", lineWidth: 1, priceScaleId: "macd", lastValueVisible: false, priceLineVisible: false });
+            difSeries.setData(macdData.dif);
+            deaSeries.setData(macdData.dea);
+          }
+          chart.subscribeCrosshairMove((param) => {
+            const tooltip = tooltipRef.current;
+            if (!tooltip || !param.time) return;
+            const point = chartData.find((item) => item.time === param.time);
+            if (!point) return;
+            const changePct = point.open ? (point.close / point.open - 1) * 100 : 0;
+            tooltip.innerHTML = [
+              `<strong>${formatChartDate(point.raw)}</strong>`,
+              `<span>开 ${point.open.toFixed(2)}</span>`,
+              `<span>高 ${point.high.toFixed(2)}</span>`,
+              `<span>低 ${point.low.toFixed(2)}</span>`,
+              `<span>收 ${point.close.toFixed(2)}</span>`,
+              `<span class="${changePct >= 0 ? "up" : "down"}">${changePct >= 0 ? "+" : ""}${changePct.toFixed(2)}%</span>`,
+              `<span>量 ${point.volume.toLocaleString("zh-CN", { maximumFractionDigits: 0 })}</span>`,
+            ].join("");
+          });
+          chart.timeScale().fitContent();
+        }}
+      />
+      <div className="chart-legend">
+        {isMinuteChart ? (
+          <>
+            <span><i style={{ background: "#69a8ff" }} />分时</span>
+            <span><i style={{ background: "#f0c04f" }} />VWAP</span>
+            <span><i style={{ background: "#d94b42" }} />成交量</span>
+          </>
+        ) : (
+          <>
+            <span><i style={{ background: "#f4d35e" }} />MA5</span>
+            <span><i style={{ background: "#8ecae6" }} />MA10</span>
+            <span><i style={{ background: "#c084fc" }} />MA20</span>
+            <span><i style={{ background: "#f59e0b" }} />MA60</span>
+            <span><i style={{ background: "#d94b42" }} />VOL</span>
+            <span><i style={{ background: "#4ea4ff" }} />DIF</span>
+            <span><i style={{ background: "#f0b84f" }} />DEA</span>
+          </>
+        )}
+      </div>
+    </div>
   );
 }
 
