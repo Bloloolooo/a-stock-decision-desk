@@ -334,6 +334,17 @@ function HomePage(props: {
     setSellForm((current) => ({ ...current, symbol: props.selectedSymbol }));
   }, [props.selectedSymbol]);
 
+  useEffect(() => {
+    if (!fullscreen) return undefined;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setFullscreen(false);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [fullscreen]);
+
   const saveCash = async () => {
     const cash = Number(cashValue);
     if (!Number.isFinite(cash) || cash < 0) {
@@ -516,7 +527,7 @@ function HomePage(props: {
         <div className="fullscreen-chart" role="dialog" aria-modal="true">
           <div className="fullscreen-top">
             <StockTabs positions={props.positions} selectedSymbol={props.selectedSymbol} onSelectSymbol={props.onSelectSymbol} />
-            <button className="close-button" onClick={() => setFullscreen(false)}>退出全屏</button>
+            <button className="close-button" onClick={() => setFullscreen(false)} title="Esc">退出全屏</button>
           </div>
           <div className="fullscreen-toolbar">
             <div>
