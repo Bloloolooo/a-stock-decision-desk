@@ -640,9 +640,22 @@ function chartVolumeRatio(volumes: number[]) {
   });
 }
 
+function chartBollinger(values: number[], window = 20, multiplier = 2) {
+  return values.map((_, index) => {
+    if (index + 1 < window) return null;
+    const scoped = values.slice(index + 1 - window, index + 1);
+    const middle = scoped.reduce((sum, value) => sum + value, 0) / window;
+    const variance = scoped.reduce((sum, value) => sum + (value - middle) ** 2, 0) / window;
+    const width = Math.sqrt(variance) * multiplier;
+    return { upper: middle + width, middle, lower: middle - width };
+  });
+}
+
+type MainChartType = "standard" | "boll";
 type SubChartType = "volume" | "macd" | "kdj" | "ratio";
 
 function KLineChart({ bars, mode = "normal" }: { bars: PriceBar[]; mode?: "normal" | "fullscreen" }) {
+  const [mainChart, setMainChart] = useState<MainChartType>("standard");
   const [subchart, setSubchart] = useState<SubChartType>("macd");
   const tooltipRef = useRef<HTMLDivElement | null>(null);
   const isMinuteChart = bars.some((bar) => bar.timestamp.includes(" "));
@@ -689,6 +702,19 @@ function KLineChart({ bars, mode = "normal" }: { bars: PriceBar[]; mode?: "norma
         .filter((item): item is { time: UTCTimestamp | string; value: number } => item !== null),
     }));
   }, [chartData]);
+  const bollData = useMemo(() => {
+    const points = chartBollinger(chartData.map((item) => item.close));
+    const toSeries = (key: "upper" | "middle" | "lower") => points
+      .map((point, index) => point == null ? null : { time: chartData[index].time, value: point[key] })
+      .filter((item): item is { time: UTCTimestamp | string; value: number } => item !== null);
+    const latest = [...points].reverse().find((point): point is { upper: number; middle: number; lower: number } => point !== null) ?? null;
+    return {
+      upper: toSeries("upper"),
+      middle: toSeries("middle"),
+      lower: toSeries("lower"),
+      latest,
+    };
+  }, [chartData]);
   const macdData = useMemo(() => {
     const points = chartMacd(chartData.map((item) => item.close));
     return {
@@ -730,6 +756,13 @@ function KLineChart({ bars, mode = "normal" }: { bars: PriceBar[]; mode?: "norma
     }
     : null;
   const latestVolume = volumeData[volumeData.length - 1]?.value ?? 0;
+  const mainChartReadout = mainChart === "boll" && bollData.latest
+    ? `UP ${bollData.latest.upper.toFixed(2)}  MID ${bollData.latest.middle.toFixed(2)}  DN ${bollData.latest.lower.toFixed(2)}`
+    : isMinuteChart ? "分时 + VWAP" : "K线 + MA5/10/20/60";
+  const mainChartTabs: Array<{ key: MainChartType; label: string }> = [
+    { key: "standard", label: "常规" },
+    { key: "boll", label: "布林(BOLL)" },
+  ];
   const subchartReadout = {
     volume: `成交量 ${latestVolume.toLocaleString("zh-CN", { maximumFractionDigits: 0 })}`,
     macd: latestMacd
@@ -761,6 +794,19 @@ function KLineChart({ bars, mode = "normal" }: { bars: PriceBar[]; mode?: "norma
           </>
         ) : <span>暂无行情</span>}
       </div>
+      <div className="mainchart-tabs" role="tablist" aria-label="主图视图">
+        {mainChartTabs.map((item) => (
+          <button
+            key={item.key}
+            className={mainChart === item.key ? "active" : ""}
+            type="button"
+            onClick={() => setMainChart(item.key)}
+          >
+            {item.label}
+          </button>
+        ))}
+        <span className="mainchart-readout">{mainChartReadout}</span>
+      </div>
       <div
         className="chart-main-canvas"
         data-mode={mode}
@@ -779,9 +825,12 @@ function KLineChart({ bars, mode = "normal" }: { bars: PriceBar[]; mode?: "norma
           if (isMinuteChart) {
             const lineSeries = chart.addLineSeries({ color: "#69a8ff", lineWidth: 2, priceScaleId: "right" });
             lineSeries.setData(lineData);
-            const vwapSeries = chart.addLineSeries({ color: "#f0c04f", lineWidth: 1, priceScaleId: "right" });
-            vwapSeries.setData(vwapData);
-          } else {
+            if (mainChart === "standard") {
+              const vwapSeries = chart.addLineSeries({ color: "#f0c04f", lineWidth: 1, priceScaleId: "right" });
+              vwapSeries.setData(vwapData);
+            }
+          }
+          if (!isMinuteChart) {
             const candleSeries = chart.addCandlestickSeries({
               upColor: "#d94b42",
               downColor: "#14a06f",
@@ -792,11 +841,21 @@ function KLineChart({ bars, mode = "normal" }: { bars: PriceBar[]; mode?: "norma
               priceScaleId: "right",
             });
             candleSeries.setData(chartData);
-            const maColors: Record<number, string> = { 5: "#f4d35e", 10: "#8ecae6", 20: "#c084fc", 60: "#f59e0b" };
-            maData.forEach((ma) => {
-              const series = chart.addLineSeries({ color: maColors[ma.window], lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
-              series.setData(ma.data);
-            });
+            if (mainChart === "standard") {
+              const maColors: Record<number, string> = { 5: "#f4d35e", 10: "#8ecae6", 20: "#c084fc", 60: "#f59e0b" };
+              maData.forEach((ma) => {
+                const series = chart.addLineSeries({ color: maColors[ma.window], lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
+                series.setData(ma.data);
+              });
+            }
+          }
+          if (mainChart === "boll") {
+            const upperSeries = chart.addLineSeries({ color: "#f0b84f", lineWidth: 1, lineStyle: LineStyle.Dashed, priceLineVisible: false, lastValueVisible: false });
+            const middleSeries = chart.addLineSeries({ color: "#8ecae6", lineWidth: 2, priceLineVisible: false, lastValueVisible: false });
+            const lowerSeries = chart.addLineSeries({ color: "#f0b84f", lineWidth: 1, lineStyle: LineStyle.Dashed, priceLineVisible: false, lastValueVisible: false });
+            upperSeries.setData(bollData.upper);
+            middleSeries.setData(bollData.middle);
+            lowerSeries.setData(bollData.lower);
           }
           chart.subscribeCrosshairMove((param) => {
             const tooltip = tooltipRef.current;
@@ -882,7 +941,13 @@ function KLineChart({ bars, mode = "normal" }: { bars: PriceBar[]; mode?: "norma
         }}
       />
       <div className="chart-legend">
-        {isMinuteChart ? (
+        {mainChart === "boll" ? (
+          <>
+            <span><i style={{ background: "#69a8ff" }} />价格</span>
+            <span><i style={{ background: "#f0b84f" }} />BOLL上/下轨</span>
+            <span><i style={{ background: "#8ecae6" }} />BOLL中轨</span>
+          </>
+        ) : isMinuteChart ? (
           <>
             <span><i style={{ background: "#69a8ff" }} />分时</span>
             <span><i style={{ background: "#f0c04f" }} />VWAP</span>

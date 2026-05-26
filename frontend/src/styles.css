@@ -413,14 +413,14 @@ td small {
   position: relative;
   min-height: 590px;
   display: grid;
-  grid-template-rows: auto minmax(360px, 1fr) auto 150px auto;
+  grid-template-rows: auto auto minmax(360px, 1fr) auto 150px auto;
   background: #0f1724;
 }
 
 .pro-chart[data-mode="fullscreen"] {
   min-height: 0;
   height: calc(100vh - 132px);
-  grid-template-rows: auto minmax(360px, 1fr) auto 180px auto;
+  grid-template-rows: auto auto minmax(360px, 1fr) auto 180px auto;
 }
 
 .chart-main-canvas {
@@ -442,6 +442,7 @@ td small {
   height: 100%;
 }
 
+.mainchart-tabs,
 .subchart-tabs {
   min-height: 38px;
   display: flex;
@@ -453,6 +454,12 @@ td small {
   background: #101a2a;
 }
 
+.mainchart-tabs {
+  border-top: 0;
+  background: #0f1724;
+}
+
+.mainchart-tabs button,
 .subchart-tabs button {
   border: 1px solid #263957;
   border-radius: 5px;
@@ -464,17 +471,20 @@ td small {
   cursor: pointer;
 }
 
+.mainchart-tabs button:hover,
 .subchart-tabs button:hover {
   border-color: #3b5f92;
   color: #eef5ff;
 }
 
+.mainchart-tabs button.active,
 .subchart-tabs button.active {
   border-color: #2f71c8;
   background: #1f4f8f;
   color: #fff;
 }
 
+.mainchart-readout,
 .subchart-readout {
   margin-left: auto;
   color: #d1dbeb;
