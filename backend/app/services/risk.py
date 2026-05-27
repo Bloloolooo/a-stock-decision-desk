@@ -18,15 +18,61 @@ def fractional_kelly(win_rate: float, win_loss_ratio: float, fraction: float = 0
     return max(0.0, raw * fraction)
 
 
+def average_true_range(bars, window: int = 14) -> float:
+    if len(bars) < 2:
+        return 0.0
+    ranges = []
+    for index in range(1, len(bars)):
+        current = bars[index]
+        previous = bars[index - 1]
+        ranges.append(max(current.high - current.low, abs(current.high - previous.close), abs(current.low - previous.close)))
+    scoped = ranges[-window:]
+    return sum(scoped) / len(scoped) if scoped else 0.0
+
+
+def trading_edge_from_records() -> tuple[float, float, str]:
+    records = list(reversed(portfolio_service.trade_records(limit=300)))
+    lots: dict[str, list[tuple[int, float]]] = {}
+    realized: list[float] = []
+    for trade in records:
+        if trade.side == "buy":
+            lots.setdefault(trade.symbol, []).append((trade.quantity, trade.price))
+            continue
+        remaining = trade.quantity
+        symbol_lots = lots.setdefault(trade.symbol, [])
+        while remaining > 0 and symbol_lots:
+            quantity, price = symbol_lots[0]
+            matched = min(quantity, remaining)
+            realized.append((trade.price - price) * matched)
+            remaining -= matched
+            if matched == quantity:
+                symbol_lots.pop(0)
+            else:
+                symbol_lots[0] = (quantity - matched, price)
+    if len(realized) < 3:
+        return 0.52, 1.45, "样本不足，暂用默认胜率 52%、盈亏比 1.45"
+    wins = [value for value in realized if value > 0]
+    losses = [abs(value) for value in realized if value < 0]
+    if not wins or not losses:
+        return 0.52, 1.45, "真实交易样本单边，暂用默认胜率 52%、盈亏比 1.45"
+    win_rate = len(wins) / len(realized)
+    win_loss_ratio = (sum(wins) / len(wins)) / (sum(losses) / len(losses))
+    return win_rate, win_loss_ratio, f"基于 {len(realized)} 笔已平仓交易估算胜率/盈亏比"
+
+
 class RiskService:
     def advice(self, symbol: str) -> RiskAdvice:
         summary = portfolio_service.summary()
         positions = {position.symbol: position for position in portfolio_service.positions()}
         position = positions.get(symbol)
         current_price = market_data.latest_price(symbol)
-        stop_loss_price = round(current_price * 0.948, 2)
+        daily = market_data.bars(symbol=symbol, period="daily")
+        atr = average_true_range(daily[-60:])
+        stop_loss_distance = max(atr * 2, current_price * 0.03)
+        stop_loss_price = round(max(0.01, current_price - stop_loss_distance), 2)
         fixed_amount = fixed_risk_position_amount(summary.total_assets, current_price, stop_loss_price, 0.012)
-        kelly_ratio = fractional_kelly(win_rate=0.52, win_loss_ratio=1.45, fraction=0.25)
+        win_rate, win_loss_ratio, kelly_source = trading_edge_from_records()
+        kelly_ratio = fractional_kelly(win_rate=win_rate, win_loss_ratio=win_loss_ratio, fraction=0.25)
         kelly_amount = summary.total_assets * kelly_ratio if kelly_ratio > 0 else fixed_amount
         suggested_max_amount = min(fixed_amount, kelly_amount, summary.total_assets * 0.35)
         current_market_value = position.market_value if position else 0.0
@@ -71,9 +117,9 @@ class RiskService:
             message=message,
             signal_sources=[
                 f"仓位：当前单票约 {position_ratio * 100:.1f}%，建议区间 25%-35%",
-                f"风控：止损距离约 {stop_loss_gap * 100:.1f}%，单票风险 {round(single_stock_risk, 2)} 元",
+                f"风控：ATR约 {atr:.2f}，止损距离约 {stop_loss_gap * 100:.1f}%，单票风险 {round(single_stock_risk, 2)} 元",
                 f"资金：现金占比约 {cash_ratio * 100:.1f}%，最大可加仓 {round(max_buy_amount, 2)} 元",
-                "凯利：默认胜率 52%、盈亏比 1.45、使用 0.25 分数凯利",
+                f"凯利：{kelly_source}，当前使用 {kelly_ratio * 100:.1f}% 分数凯利上限",
             ],
             action_suggestions=action_suggestions,
             kelly_enabled=True,

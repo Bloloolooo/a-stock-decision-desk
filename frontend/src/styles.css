@@ -97,7 +97,7 @@ button {
 }
 
 .market-pulse {
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
 }
 
 .metric-card,
@@ -761,6 +761,44 @@ td small {
   line-height: 1.7;
 }
 
+.scan-progress {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid #dce6f0;
+  border-radius: 7px;
+  background: #fff;
+  color: #475467;
+  font-size: 12px;
+}
+
+.scan-progress strong {
+  color: #101828;
+  font-size: 13px;
+}
+
+.scan-progress i {
+  display: block;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #edf2f7;
+}
+
+.scan-progress b {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: #24569b;
+}
+
+.scan-progress em {
+  color: #b54708;
+  font-style: normal;
+  line-height: 1.4;
+}
+
 .side-actions {
   display: grid;
   gap: 8px;
@@ -959,6 +997,77 @@ td small {
   padding: 0;
   border: 0;
   background: transparent;
+}
+
+.backtest-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.backtest-controls,
+.backtest-metrics {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.backtest-controls label {
+  display: grid;
+  gap: 5px;
+  color: #667085;
+  font-size: 12px;
+}
+
+.backtest-controls input {
+  min-width: 0;
+  border: 1px solid #d6e0ea;
+  border-radius: 6px;
+  padding: 8px 9px;
+  font-size: 13px;
+}
+
+.backtest-metrics {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.backtest-summary,
+.empty-note {
+  margin: 0;
+  color: #475467;
+  font-size: 13px;
+}
+
+.equity-curve {
+  border: 1px solid #e3eaf2;
+  border-radius: 7px;
+  padding: 10px;
+  background: #fbfdff;
+}
+
+.equity-curve svg {
+  display: block;
+  width: 100%;
+  height: 220px;
+}
+
+.equity-curve polyline {
+  fill: none;
+  stroke: #1f6feb;
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.equity-curve div {
+  display: flex;
+  justify-content: space-between;
+  color: #667085;
+  font-size: 12px;
+}
+
+.trade-table.compact {
+  border: 1px solid #e4ebf3;
+  border-radius: 7px;
 }
 
 .trade-table {
@@ -1221,6 +1330,14 @@ td small {
     grid-template-columns: minmax(0, 1.4fr) repeat(3, minmax(0, 1fr));
     gap: 10px;
   }
+
+  .backtest-controls {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .backtest-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 1400px) {
@@ -1244,7 +1361,10 @@ td small {
   .home-grid,
   .advisor,
   .metrics-grid,
-  .market-pulse {
+  .market-pulse,
+  .review-summary,
+  .backtest-controls,
+  .backtest-metrics {
     grid-template-columns: 1fr;
   }
 

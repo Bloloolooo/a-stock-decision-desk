@@ -53,7 +53,8 @@ class FakeMarketData:
         return bars
 
 
-def test_screener_scores_real_bars(monkeypatch) -> None:
+def test_screener_scores_real_bars(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("STOCK_TOOL_DB_PATH", str(tmp_path / "test.sqlite3"))
     monkeypatch.setenv("SCREENER_SYMBOLS", "000001,000002,000003")
     monkeypatch.setattr(screener_module, "market_data", FakeMarketData())
     service = ScreenerService()

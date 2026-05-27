@@ -120,6 +120,64 @@ class RiskAdvice(BaseModel):
     updated_at: datetime
 
 
+class BacktestRequest(BaseModel):
+    symbol: str
+    start_date: date | None = None
+    end_date: date | None = None
+    initial_cash: float = Field(default=100000, gt=0)
+    buy_threshold: int = Field(default=72, ge=0, le=100)
+    sell_threshold: int = Field(default=45, ge=0, le=100)
+    atr_multiplier: float = Field(default=2.0, gt=0)
+    max_position_ratio: float = Field(default=0.35, gt=0, le=1)
+    commission_rate: float = Field(default=0.0003, ge=0)
+    stamp_tax_rate: float = Field(default=0.0005, ge=0)
+    slippage_rate: float = Field(default=0.0005, ge=0)
+
+
+class BacktestTrade(BaseModel):
+    trade_date: date
+    side: Literal["buy", "sell"]
+    price: float
+    quantity: int
+    amount: float
+    fee: float
+    reason: str
+    confidence: int
+    pnl: float | None = None
+    pnl_pct: float | None = None
+
+
+class BacktestEquityPoint(BaseModel):
+    trade_date: date
+    equity: float
+    cash: float
+    position_value: float
+    drawdown_pct: float
+    confidence: int
+
+
+class BacktestResult(BaseModel):
+    symbol: str
+    name: str
+    start_date: date
+    end_date: date
+    initial_cash: float
+    final_equity: float
+    total_return_pct: float
+    annual_return_pct: float
+    max_drawdown_pct: float
+    sharpe_ratio: float
+    win_rate: float
+    win_loss_ratio: float
+    trade_count: int
+    average_holding_days: float
+    estimated_kelly_ratio: float
+    cost_total: float
+    trades: list[BacktestTrade]
+    equity_curve: list[BacktestEquityPoint]
+    summary: str
+
+
 class ScreenerResult(BaseModel):
     list_type: Literal["trend", "rebound"]
     symbol: str
@@ -148,6 +206,14 @@ class ScreenerStatus(BaseModel):
     last_duration_seconds: float | None = None
     last_error_count: int = 0
     symbols: list[str]
+    scan_status: str = "idle"
+    scope: str = "default"
+    total_count: int = 0
+    processed_count: int = 0
+    success_count: int = 0
+    market_environment: str = "未知"
+    market_factor: float = 1.0
+    last_error: str | None = None
 
 
 class PredictionSettings(BaseModel):

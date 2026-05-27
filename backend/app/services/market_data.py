@@ -31,6 +31,9 @@ class MarketDataProvider(Protocol):
     def bars(self, symbol: str, period: str = "daily", adjust: str = "qfq") -> list[PriceBar]:
         ...
 
+    def stocks(self) -> list[StockInfo]:
+        ...
+
 
 class SampleMarketDataProvider:
     provider_name = "sample"
@@ -59,6 +62,9 @@ class SampleMarketDataProvider:
 
     def name(self, symbol: str) -> str:
         return self.names.get(symbol, "")
+
+    def stocks(self) -> list[StockInfo]:
+        return [StockInfo(symbol=symbol, name=name) for symbol, name in self.names.items()]
 
     def bars(self, symbol: str, period: str = "daily", adjust: str = "qfq") -> list[PriceBar]:
         today = date.today()
@@ -137,6 +143,27 @@ class AkShareMarketDataProvider:
             if sina_name:
                 self._name_cache[symbol] = sina_name
         return self._name_cache.get(symbol, self.fallback.name(symbol))
+
+    def stocks(self) -> list[StockInfo]:
+        try:
+            import akshare as ak
+
+            frame = ak.stock_info_a_code_name()
+            stocks: list[StockInfo] = []
+            for row in frame.to_dict("records"):
+                code = str(row.get("code") or row.get("代码") or "").strip()
+                name = str(row.get("name") or row.get("名称") or "").strip()
+                if len(code) == 6 and code.isdigit() and name:
+                    self._name_cache[code] = name
+                    stocks.append(StockInfo(symbol=code, name=name))
+            if stocks:
+                self.last_source = "akshare"
+                self.last_error = None
+                return stocks
+        except Exception as exc:
+            self.last_source = "sample"
+            self.last_error = f"AkShare 股票列表失败：{exc}"
+        return self.fallback.stocks()
 
     def _fetch_sina_name(self, symbol: str) -> str:
         market_symbol = self._sina_symbol(symbol)
@@ -790,6 +817,22 @@ class MarketDataManager:
     def bars(self, symbol: str, period: str = "daily", adjust: str = "qfq") -> list[PriceBar]:
         return self._call("bars", symbol, period, adjust)
 
+    def stocks(self) -> list[StockInfo]:
+        configured = self._provider()
+        candidates: list[MarketDataProvider] = [configured]
+        for fallback in [self.akshare, self.efinance, self.sina, self.tencent, self.baostock, self.sample]:
+            if fallback not in candidates:
+                candidates.append(fallback)
+        for candidate in candidates:
+            try:
+                stocks = candidate.stocks()
+            except Exception:
+                continue
+            if stocks:
+                self._sync_status(candidate)
+                return stocks
+        return self.sample.stocks()
+
     def _call(self, method: str, *args):
         provider = self._provider()
         result = getattr(provider, method)(*args)
@@ -837,6 +880,10 @@ if os.getenv("MARKET_DATA_PROVIDER") == "sample":
 
 def stock_info(symbol: str) -> StockInfo:
     return StockInfo(symbol=symbol, name=market_data.name(symbol))
+
+
+def stock_universe() -> list[StockInfo]:
+    return market_data.stocks()
 
 
 def market_status() -> MarketStatus:

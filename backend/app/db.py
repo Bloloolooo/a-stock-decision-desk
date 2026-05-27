@@ -67,6 +67,41 @@ def init_db() -> None:
         )
         connection.execute(
             """
+            CREATE TABLE IF NOT EXISTS screener_scan_state (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                status TEXT NOT NULL DEFAULT 'idle',
+                scope TEXT NOT NULL DEFAULT 'default',
+                total_count INTEGER NOT NULL DEFAULT 0,
+                processed_count INTEGER NOT NULL DEFAULT 0,
+                success_count INTEGER NOT NULL DEFAULT 0,
+                error_count INTEGER NOT NULL DEFAULT 0,
+                market_environment TEXT NOT NULL DEFAULT '未知',
+                market_factor REAL NOT NULL DEFAULT 1.0,
+                last_error TEXT,
+                started_at TEXT,
+                finished_at TEXT,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS screener_results (
+                list_type TEXT NOT NULL,
+                symbol TEXT NOT NULL,
+                name TEXT NOT NULL,
+                score INTEGER NOT NULL,
+                change_pct REAL NOT NULL,
+                reason TEXT NOT NULL,
+                risk_status TEXT NOT NULL,
+                factors_json TEXT NOT NULL,
+                generated_at TEXT NOT NULL,
+                PRIMARY KEY (list_type, symbol)
+            )
+            """
+        )
+        connection.execute(
+            """
             CREATE TABLE IF NOT EXISTS prediction_settings (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
                 enabled INTEGER NOT NULL DEFAULT 0,
@@ -99,6 +134,15 @@ def init_db() -> None:
             """
             INSERT OR IGNORE INTO screener_config (id, symbols, updated_at)
             VALUES (1, '', datetime('now'))
+            """
+        )
+        connection.execute(
+            """
+            INSERT OR IGNORE INTO screener_scan_state (
+                id, status, scope, total_count, processed_count, success_count, error_count,
+                market_environment, market_factor, last_error, started_at, finished_at, updated_at
+            )
+            VALUES (1, 'idle', 'default', 0, 0, 0, 0, '未知', 1.0, NULL, NULL, NULL, datetime('now'))
             """
         )
         connection.execute(

@@ -126,6 +126,14 @@ export type ScreenerStatus = {
   last_duration_seconds?: number | null;
   last_error_count: number;
   symbols: string[];
+  scan_status: string;
+  scope: string;
+  total_count: number;
+  processed_count: number;
+  success_count: number;
+  market_environment: string;
+  market_factor: number;
+  last_error?: string | null;
 };
 
 export type PredictionStatus = {
@@ -150,6 +158,62 @@ export type PredictionResult = {
   expected_change_pct: number;
   generated_at: string;
   message: string;
+};
+
+export type BacktestRequest = {
+  symbol: string;
+  initial_cash: number;
+  buy_threshold: number;
+  sell_threshold: number;
+  atr_multiplier: number;
+  max_position_ratio: number;
+  commission_rate: number;
+  stamp_tax_rate: number;
+  slippage_rate: number;
+};
+
+export type BacktestTrade = {
+  trade_date: string;
+  side: "buy" | "sell";
+  price: number;
+  quantity: number;
+  amount: number;
+  fee: number;
+  reason: string;
+  confidence: number;
+  pnl?: number | null;
+  pnl_pct?: number | null;
+};
+
+export type BacktestEquityPoint = {
+  trade_date: string;
+  equity: number;
+  cash: number;
+  position_value: number;
+  drawdown_pct: number;
+  confidence: number;
+};
+
+export type BacktestResult = {
+  symbol: string;
+  name: string;
+  start_date: string;
+  end_date: string;
+  initial_cash: number;
+  final_equity: number;
+  total_return_pct: number;
+  annual_return_pct: number;
+  max_drawdown_pct: number;
+  sharpe_ratio: number;
+  win_rate: number;
+  win_loss_ratio: number;
+  trade_count: number;
+  average_holding_days: number;
+  estimated_kelly_ratio: number;
+  cost_total: number;
+  trades: BacktestTrade[];
+  equity_curve: BacktestEquityPoint[];
+  summary: string;
 };
 
 export type IndicatorPoint = {

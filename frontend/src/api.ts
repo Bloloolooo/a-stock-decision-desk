@@ -1,4 +1,4 @@
-import type { DecisionCenter, MarketPeriod, MarketSettings, MarketStatus, PortfolioSummary, Position, PositionInput, PredictionResult, PredictionStatus, PriceBar, RiskAdvice, ScreenerConfig, ScreenerResult, ScreenerStatus, SellInput, TradeRecord } from "./types";
+import type { BacktestRequest, BacktestResult, DecisionCenter, MarketPeriod, MarketSettings, MarketStatus, PortfolioSummary, Position, PositionInput, PredictionResult, PredictionStatus, PriceBar, RiskAdvice, ScreenerConfig, ScreenerResult, ScreenerStatus, SellInput, TradeRecord } from "./types";
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? "http://localhost:8000/api";
 
@@ -80,4 +80,5 @@ export const api = {
   updatePredictionSettings: (enabled: boolean, model_name: string) => putJson<PredictionStatus>("/prediction/settings", { enabled, model_name }),
   installPrediction: () => postJson<PredictionStatus>("/prediction/install", {}),
   prediction: (symbol: string, horizon: number) => getJson<PredictionResult>(`/prediction/${symbol}?horizon=${horizon}`),
+  runBacktest: (payload: BacktestRequest) => postJson<BacktestResult>("/backtest/run", payload),
 };

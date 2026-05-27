@@ -2,7 +2,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { createChart, ColorType, LineStyle, type IChartApi, type UTCTimestamp } from "lightweight-charts";
 
 import { api } from "./api";
-import type { DecisionCenter, MarketPeriod, MarketSettings, MarketStatus, PortfolioSummary, Position, PredictionResult, PredictionStatus, PriceBar, RiskAdvice, ScreenerConfig, ScreenerResult, ScreenerStatus, TradeRecord } from "./types";
+import type { BacktestRequest, BacktestResult, DecisionCenter, MarketPeriod, MarketSettings, MarketStatus, PortfolioSummary, Position, PredictionResult, PredictionStatus, PriceBar, RiskAdvice, ScreenerConfig, ScreenerResult, ScreenerStatus, TradeRecord } from "./types";
 
 const emptySummary: PortfolioSummary = {
   total_assets: 0,
@@ -71,6 +71,7 @@ export default function App() {
   const [screenerStatus, setScreenerStatus] = useState<ScreenerStatus | null>(null);
   const [predictionStatus, setPredictionStatus] = useState<PredictionStatus | null>(null);
   const [prediction, setPrediction] = useState<PredictionResult | null>(null);
+  const [backtest, setBacktest] = useState<BacktestResult | null>(null);
   const [marketStatus, setMarketStatus] = useState<MarketStatus | null>(null);
   const [marketSettings, setMarketSettings] = useState<MarketSettings | null>(null);
   const [decision, setDecision] = useState<DecisionCenter | null>(null);
@@ -190,6 +191,16 @@ export default function App() {
       .catch(() => setStatus("预测尚未就绪"));
   };
 
+  const runBacktest = (payload: BacktestRequest) => {
+    setStatus("正在回测策略");
+    return api.runBacktest(payload)
+      .then((result) => {
+        setBacktest(result);
+        setStatus("回测完成");
+      })
+      .catch((error: Error) => setStatus(error.message));
+  };
+
   useEffect(() => {
     Promise.all([api.summary(), api.positions(), api.trades(), api.screenerConfig(), api.screenerStatus(), api.predictionStatus(), api.marketStatus(), api.marketSettings(), api.marketPeriods()])
       .then(([summaryData, positionData, tradeData, configData, statusData, predictionStatusData, marketStatusData, marketSettingsData, periodData]) => {
@@ -209,7 +220,20 @@ export default function App() {
     const predictionTimer = window.setInterval(() => {
       reloadPredictionStatus().catch(() => undefined);
     }, 5000);
-    return () => window.clearInterval(predictionTimer);
+    const screenerTimer = window.setInterval(() => {
+      api.screenerStatus()
+        .then((statusData) => {
+          setScreenerStatus(statusData);
+          if (statusData.scan_status === "running" || statusData.scan_status === "ready") {
+            reloadScreener().catch(() => undefined);
+          }
+        })
+        .catch(() => undefined);
+    }, 4000);
+    return () => {
+      window.clearInterval(predictionTimer);
+      window.clearInterval(screenerTimer);
+    };
   }, []);
 
   useEffect(() => {
@@ -276,7 +300,7 @@ export default function App() {
           }}
         />
       )}
-      {tab === "review" && <ReviewPage trades={trades} positions={positions} summary={summary} />}
+      {tab === "review" && <ReviewPage trades={trades} positions={positions} summary={summary} selectedSymbol={selectedSymbol} result={backtest} onRun={runBacktest} />}
       {tab === "prediction" && (
         <PredictionPage
           selectedSymbol={selectedSymbol}
@@ -1330,6 +1354,8 @@ function ScreenerPage(props: {
   const strongCount = props.trend.filter((row) => row.score >= 75).length;
   const reboundCount = props.rebound.filter((row) => row.score >= 70).length;
   const cacheAge = props.status?.cache_age_seconds == null ? "--" : `${props.status.cache_age_seconds} 秒`;
+  const progress = props.status?.total_count ? Math.round((props.status.processed_count / props.status.total_count) * 100) : 0;
+  const isScanning = props.status?.scan_status === "running" || props.status?.scan_status === "queued";
   const configuredSymbols = props.config?.symbols ?? [];
   const activeSymbols = props.status?.symbols ?? (configuredSymbols.length > 0 ? configuredSymbols : defaultScreenerSymbols);
   const isUsingDefaultPool = configuredSymbols.length === 0;
@@ -1370,11 +1396,19 @@ function ScreenerPage(props: {
         <Filter label="策略" value="趋势追强 + 超跌修复" />
         <Filter label="流动性" value="5日均额 > 3000 万" />
         <Filter label="风险过滤" value="开启" />
+        <Filter label="扫描范围" value={props.status?.scope === "full_market" ? "全市场" : props.status?.scope === "custom" ? "自定义" : "核心池"} />
         <Filter label="股票池" value={`${props.status?.pool_size ?? 0} 只`} />
+        <Filter label="市场环境" value={`${props.status?.market_environment ?? "未知"} · ${(props.status?.market_factor ?? 1).toFixed(2)}x`} />
         <Filter label="缓存年龄" value={cacheAge} />
-        <div className="filter-note">当前先扫描核心股票池，基于真实日 K 计算涨跌幅、均线、回撤、量能和风险状态。下一步可升级为盘后全 A 股缓存扫描。</div>
+        <div className="filter-note">默认自动获取 A 股全市场股票池并后台分批扫描，页面读取最近缓存结果；自定义股票池可用于缩小扫描范围。</div>
+        <div className="scan-progress">
+          <span>{props.status?.scan_status === "queued" ? "等待扫描启动" : isScanning ? `扫描中 ${progress}%` : props.status?.scan_status === "ready" ? "扫描完成" : "等待扫描"}</span>
+          <strong>{props.status?.processed_count ?? 0}/{props.status?.total_count ?? 0}</strong>
+          <i><b style={{ width: `${progress}%` }} /></i>
+          {props.status?.last_error && <em>{props.status.last_error}</em>}
+        </div>
         <div className="side-actions">
-          <button className="primary-action" onClick={props.onRefresh}>刷新扫描</button>
+          <button className="primary-action" onClick={props.onRefresh} disabled={isScanning}>{isScanning ? "扫描中" : "全市场扫描"}</button>
           <button className="secondary-action" onClick={() => setView("manage")}>管理股票池</button>
         </div>
       </aside>
@@ -1388,6 +1422,7 @@ function ScreenerPage(props: {
           <Metric label="风险通过" value={`${passCount} 条`} />
           <Metric label="强趋势" value={`${strongCount} 只`} tone={strongCount > 0 ? "up" : undefined} />
           <Metric label="反弹候选" value={`${reboundCount} 只`} tone={reboundCount > 0 ? "up" : undefined} />
+          <Metric label="扫描成功" value={`${props.status?.success_count ?? 0} 只`} />
           <Metric label="生成时间" value={generatedAt} />
         </div>
         {view === "lists" ? (
@@ -1477,10 +1512,44 @@ function ResultList(props: { title: string; subtitle: string; rows: ScreenerResu
   );
 }
 
-function ReviewPage(props: { trades: TradeRecord[]; positions: Position[]; summary: PortfolioSummary }) {
+function ReviewPage(props: {
+  trades: TradeRecord[];
+  positions: Position[];
+  summary: PortfolioSummary;
+  selectedSymbol: string;
+  result: BacktestResult | null;
+  onRun: (payload: BacktestRequest) => Promise<void>;
+}) {
+  const [symbol, setSymbol] = useState(props.selectedSymbol);
+  const [initialCash, setInitialCash] = useState(100000);
+  const [buyThreshold, setBuyThreshold] = useState(72);
+  const [sellThreshold, setSellThreshold] = useState(45);
+  const [atrMultiplier, setAtrMultiplier] = useState(2);
+  const [maxPositionRatio, setMaxPositionRatio] = useState(35);
+  const [isRunning, setIsRunning] = useState(false);
   const buyAmount = props.trades.filter((trade) => trade.side === "buy").reduce((sum, trade) => sum + trade.amount, 0);
   const sellAmount = props.trades.filter((trade) => trade.side === "sell").reduce((sum, trade) => sum + trade.amount, 0);
   const activePositionCount = props.positions.length;
+  const result = props.result;
+
+  useEffect(() => {
+    setSymbol(props.selectedSymbol);
+  }, [props.selectedSymbol]);
+
+  const submitBacktest = () => {
+    setIsRunning(true);
+    props.onRun({
+      symbol,
+      initial_cash: initialCash,
+      buy_threshold: buyThreshold,
+      sell_threshold: sellThreshold,
+      atr_multiplier: atrMultiplier,
+      max_position_ratio: maxPositionRatio / 100,
+      commission_rate: 0.0003,
+      stamp_tax_rate: 0.0005,
+      slippage_rate: 0.0005,
+    }).finally(() => setIsRunning(false));
+  };
 
   return (
     <main className="review-grid">
@@ -1490,6 +1559,42 @@ function ReviewPage(props: { trades: TradeRecord[]; positions: Position[]; summa
         <Metric label="累计买入" value={yuan(buyAmount)} />
         <Metric label="累计卖出" value={yuan(sellAmount)} />
         <Metric label="当前浮盈" value={signed(props.summary.floating_pnl)} tone={props.summary.floating_pnl >= 0 ? "up" : "down"} />
+      </section>
+      <section className="panel backtest-panel">
+        <div className="panel-title">
+          <div>
+            <h2>策略回测</h2>
+            <p>用当前决策评分做买卖信号，叠加 ATR 止损、滑点、佣金和印花税。</p>
+          </div>
+          <button onClick={submitBacktest} disabled={isRunning}>{isRunning ? "回测中" : "运行回测"}</button>
+        </div>
+        <div className="backtest-controls">
+          <label>股票代码<input value={symbol} onChange={(event) => setSymbol(event.target.value)} /></label>
+          <label>初始资金<input type="number" value={initialCash} onChange={(event) => setInitialCash(Number(event.target.value))} /></label>
+          <label>买入阈值<input type="number" value={buyThreshold} onChange={(event) => setBuyThreshold(Number(event.target.value))} /></label>
+          <label>卖出阈值<input type="number" value={sellThreshold} onChange={(event) => setSellThreshold(Number(event.target.value))} /></label>
+          <label>ATR倍数<input type="number" step="0.1" value={atrMultiplier} onChange={(event) => setAtrMultiplier(Number(event.target.value))} /></label>
+          <label>单票上限%<input type="number" value={maxPositionRatio} onChange={(event) => setMaxPositionRatio(Number(event.target.value))} /></label>
+        </div>
+        {result ? (
+          <>
+            <div className="backtest-metrics">
+              <Metric label="扣费后收益" value={`${result.total_return_pct >= 0 ? "+" : ""}${result.total_return_pct.toFixed(2)}%`} tone={result.total_return_pct >= 0 ? "up" : "down"} />
+              <Metric label="年化收益" value={`${result.annual_return_pct >= 0 ? "+" : ""}${result.annual_return_pct.toFixed(2)}%`} tone={result.annual_return_pct >= 0 ? "up" : "down"} />
+              <Metric label="最大回撤" value={`${result.max_drawdown_pct.toFixed(2)}%`} tone="down" />
+              <Metric label="胜率" value={`${(result.win_rate * 100).toFixed(1)}%`} />
+              <Metric label="盈亏比" value={result.win_loss_ratio.toFixed(2)} />
+              <Metric label="夏普" value={result.sharpe_ratio.toFixed(2)} />
+              <Metric label="交易次数" value={`${result.trade_count} 笔`} />
+              <Metric label="估算凯利" value={`${(result.estimated_kelly_ratio * 100).toFixed(1)}%`} />
+            </div>
+            <p className="backtest-summary">{result.name} · {result.start_date} 至 {result.end_date} · {result.summary} 成本合计 {yuan(result.cost_total)}</p>
+            <EquityCurve result={result} />
+            <BacktestTrades result={result} />
+          </>
+        ) : (
+          <p className="empty-note">运行一次回测后，会显示权益曲线、扣费后收益、回撤、胜率、盈亏比和交易明细。</p>
+        )}
       </section>
       <section className="panel trade-table">
         <div className="panel-title">
@@ -1521,6 +1626,57 @@ function ReviewPage(props: { trades: TradeRecord[]; positions: Position[]; summa
         </table>
       </section>
     </main>
+  );
+}
+
+function EquityCurve({ result }: { result: BacktestResult }) {
+  const width = 760;
+  const height = 220;
+  const values = result.equity_curve.map((point) => point.equity);
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const span = max - min || 1;
+  const points = result.equity_curve.map((point, index) => {
+    const x = result.equity_curve.length <= 1 ? 0 : (index / (result.equity_curve.length - 1)) * width;
+    const y = height - ((point.equity - min) / span) * height;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(" ");
+
+  return (
+    <div className="equity-curve">
+      <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="回测权益曲线">
+        <polyline points={points} />
+      </svg>
+      <div>
+        <span>{yuan(min)}</span>
+        <span>{yuan(max)}</span>
+      </div>
+    </div>
+  );
+}
+
+function BacktestTrades({ result }: { result: BacktestResult }) {
+  return (
+    <div className="trade-table compact">
+      <table>
+        <thead>
+          <tr><th>日期</th><th>方向</th><th>价格</th><th>数量</th><th>费用</th><th>原因</th><th>结果</th></tr>
+        </thead>
+        <tbody>
+          {result.trades.slice(-12).map((trade, index) => (
+            <tr key={`${trade.trade_date}-${trade.side}-${index}`}>
+              <td>{trade.trade_date}</td>
+              <td className={trade.side === "buy" ? "up" : "down"}>{trade.side === "buy" ? "买入" : "卖出"}</td>
+              <td>{trade.price.toFixed(2)}</td>
+              <td>{trade.quantity}</td>
+              <td>{yuan(trade.fee)}</td>
+              <td>{trade.reason} · {trade.confidence}</td>
+              <td>{trade.pnl == null ? "--" : `${signed(trade.pnl)} / ${trade.pnl_pct?.toFixed(2)}%`}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
