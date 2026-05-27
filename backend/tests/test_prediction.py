@@ -51,6 +51,19 @@ def test_prediction_check_environment_marks_ready(monkeypatch, tmp_path) -> None
     assert status.ready is True
 
 
+def test_prediction_check_environment_ready_even_when_disabled(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("STOCK_TOOL_DB_PATH", str(tmp_path / "test.sqlite3"))
+    monkeypatch.setattr(PredictionService, "_assert_runtime_usable", lambda self, model_name: None)
+    monkeypatch.setattr(PredictionService, "_runtime_ready", lambda self: True)
+    service = PredictionService()
+
+    status = service.check_environment()
+
+    assert status.enabled is False
+    assert status.install_status == "ready"
+    assert status.ready is True
+
+
 def test_prediction_venv_failure_reports_actionable_error(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("STOCK_TOOL_DB_PATH", str(tmp_path / "test.sqlite3"))
     monkeypatch.setattr(prediction_module, "VENV_PATH", tmp_path / ".venv")

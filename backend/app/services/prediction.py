@@ -68,7 +68,7 @@ class PredictionService:
 
     def status(self) -> PredictionStatus:
         settings = self.settings()
-        ready = settings.enabled and settings.install_status == "ready" and self._runtime_ready()
+        ready = settings.install_status == "ready" and self._runtime_ready()
         return PredictionStatus(
             **settings.model_dump(),
             runtime_path=str(RUNTIME_PATH),
