@@ -18,20 +18,37 @@ def test_prediction_defaults_disabled(monkeypatch, tmp_path) -> None:
 
 def test_prediction_enable_starts_install_without_blocking(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("STOCK_TOOL_DB_PATH", str(tmp_path / "test.sqlite3"))
-    started = {"value": False}
-
-    def fake_install(self):
-        started["value"] = True
-        return self.status()
-
-    monkeypatch.setattr(prediction_module.PredictionService, "install_async", fake_install)
     service = PredictionService()
 
     status = service.update_settings(enabled=True, model_name="NeoQuasar/Kronos-small")
 
-    assert started["value"] is True
     assert status.enabled is True
     assert status.model_name == "NeoQuasar/Kronos-small"
+    assert status.install_status == "manual_required"
+    assert status.install_commands
+
+
+def test_prediction_install_endpoint_reports_manual_required(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("STOCK_TOOL_DB_PATH", str(tmp_path / "test.sqlite3"))
+    service = PredictionService()
+
+    status = service.install_async()
+
+    assert status.install_status == "manual_required"
+    assert "自动安装已取消" in (status.last_error or "")
+
+
+def test_prediction_check_environment_marks_ready(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("STOCK_TOOL_DB_PATH", str(tmp_path / "test.sqlite3"))
+    monkeypatch.setattr(PredictionService, "_assert_runtime_usable", lambda self, model_name: None)
+    monkeypatch.setattr(PredictionService, "_runtime_ready", lambda self: True)
+    service = PredictionService()
+    service.update_settings(enabled=True, model_name="NeoQuasar/Kronos-small")
+
+    status = service.check_environment()
+
+    assert status.install_status == "ready"
+    assert status.ready is True
 
 
 def test_prediction_venv_failure_reports_actionable_error(monkeypatch, tmp_path) -> None:

@@ -21,6 +21,11 @@ def install() -> PredictionStatus:
     return prediction_service.install_async()
 
 
+@router.post("/check", response_model=PredictionStatus)
+def check_environment() -> PredictionStatus:
+    return prediction_service.check_environment()
+
+
 @router.get("/{symbol}", response_model=PredictionResult)
 def predict(symbol: str, horizon: int = 20) -> PredictionResult:
     try:

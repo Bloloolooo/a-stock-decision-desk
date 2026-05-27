@@ -1,4 +1,4 @@
-from app.schemas import PositionCreate, PositionSell
+from app.schemas import PositionCreate, PositionSell, WatchItemCreate
 from app.services.market_data import sample_market_data
 import app.services.portfolio as portfolio_module
 from app.services.portfolio import PortfolioService
@@ -161,3 +161,28 @@ def test_trade_records_include_buy_and_sell(monkeypatch, tmp_path) -> None:
 
     assert [trade.side for trade in trades] == ["sell", "buy"]
     assert trades[0].amount == 7200
+
+
+def test_watchlist_is_separate_from_positions(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("STOCK_TOOL_DB_PATH", str(tmp_path / "test.sqlite3"))
+    monkeypatch.setattr(portfolio_module, "market_data", sample_market_data)
+    service = PortfolioService()
+
+    item = service.add_watch_item(WatchItemCreate(symbol=" SZ300308 ", tags="观察"))
+
+    assert item.symbol == "300308"
+    assert item.name == "中际旭创"
+    assert item.tags == "观察"
+    assert service.positions() == []
+    assert service.watchlist()[0].symbol == "300308"
+
+
+def test_delete_watchlist_item(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("STOCK_TOOL_DB_PATH", str(tmp_path / "test.sqlite3"))
+    monkeypatch.setattr(portfolio_module, "market_data", sample_market_data)
+    service = PortfolioService()
+    service.add_watch_item(WatchItemCreate(symbol="300308", tags="雷达"))
+
+    service.delete_watch_item("300308")
+
+    assert service.watchlist() == []

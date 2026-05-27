@@ -18,6 +18,23 @@ export type PositionInput = {
   note?: string;
 };
 
+export type WatchItem = {
+  symbol: string;
+  name: string;
+  tags: string;
+  note: string;
+  last_price: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type WatchItemInput = {
+  symbol: string;
+  name?: string;
+  tags?: string;
+  note?: string;
+};
+
 export type SellInput = {
   symbol: string;
   quantity: number;
@@ -146,6 +163,8 @@ export type PredictionStatus = {
   updated_at: string;
   runtime_path: string;
   ready: boolean;
+  install_commands: string[];
+  environment_checks: string[];
 };
 
 export type PredictionResult = {

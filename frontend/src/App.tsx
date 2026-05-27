@@ -2,7 +2,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { createChart, ColorType, LineStyle, type IChartApi, type MouseEventParams, type Time, type UTCTimestamp } from "lightweight-charts";
 
 import { api } from "./api";
-import type { BacktestRequest, BacktestResult, DecisionCenter, MarketPeriod, MarketSettings, MarketStatus, PortfolioSummary, Position, PredictionResult, PredictionStatus, PriceBar, RiskAdvice, ScreenerConfig, ScreenerResult, ScreenerStatus, TradeRecord } from "./types";
+import type { BacktestRequest, BacktestResult, DecisionCenter, MarketPeriod, MarketSettings, MarketStatus, PortfolioSummary, Position, PredictionResult, PredictionStatus, PriceBar, RiskAdvice, ScreenerConfig, ScreenerResult, ScreenerStatus, TradeRecord, WatchItem } from "./types";
 
 const emptySummary: PortfolioSummary = {
   total_assets: 0,
@@ -66,6 +66,7 @@ export default function App() {
   const [period, setPeriod] = useState("daily");
   const [summary, setSummary] = useState<PortfolioSummary>(emptySummary);
   const [positions, setPositions] = useState<Position[]>([]);
+  const [watchlist, setWatchlist] = useState<WatchItem[]>([]);
   const [trades, setTrades] = useState<TradeRecord[]>([]);
   const [bars, setBars] = useState<PriceBar[]>([]);
   const [risk, setRisk] = useState<RiskAdvice | null>(null);
@@ -84,10 +85,11 @@ export default function App() {
   const [status, setStatus] = useState("加载中");
 
   const reloadPortfolio = () => {
-    return Promise.all([api.summary(), api.positions()])
-      .then(([summaryData, positionData]) => {
+    return Promise.all([api.summary(), api.positions(), api.watchlist()])
+      .then(([summaryData, positionData, watchData]) => {
         setSummary(summaryData);
         setPositions(positionData);
+        setWatchlist(watchData);
         return api.trades()
           .then(setTrades)
           .catch(() => undefined);
@@ -146,6 +148,30 @@ export default function App() {
       });
   };
 
+  const addWatchItem = (symbol: string, tags = "观察") => {
+    const normalized = symbol.replace(/\D/g, "");
+    if (normalized.length !== 6) return Promise.reject(new Error("请输入 6 位股票代码"));
+    setStatus("加入自选观察中");
+    return api.addWatchItem({ symbol: normalized, tags })
+      .then(() => reloadPortfolio())
+      .then(() => setStatus("已加入自选观察"))
+      .catch((error) => {
+        setStatus("加入自选观察失败");
+        throw error;
+      });
+  };
+
+  const deleteWatchItem = (symbol: string) => {
+    setStatus("移除自选观察中");
+    return api.deleteWatchItem(symbol)
+      .then(setWatchlist)
+      .then(() => setStatus("已移除自选观察"))
+      .catch((error) => {
+        setStatus("移除自选观察失败");
+        throw error;
+      });
+  };
+
   const reloadPredictionStatus = () => api.predictionStatus().then(setPredictionStatus);
 
   const saveMarketSettings = (provider: string, tushareToken: string) => {
@@ -166,15 +192,29 @@ export default function App() {
   };
 
   const savePredictionSettings = (enabled: boolean, modelName: string) => {
-    setStatus(enabled ? "正在准备预测环境" : "预测功能已关闭");
+    setStatus(enabled ? "预测功能已启用，请手动安装并检查环境" : "预测功能已关闭");
     return api.updatePredictionSettings(enabled, modelName)
       .then((statusData) => {
         setPredictionStatus(statusData);
-        setStatus(enabled ? "预测功能已启用" : "预测功能已关闭");
+        setStatus(enabled ? "预测设置已保存" : "预测功能已关闭");
         return statusData;
       })
       .catch((error) => {
         setStatus("预测设置保存失败");
+        throw error;
+      });
+  };
+
+  const checkPredictionEnvironment = () => {
+    setStatus("检查 Kronos 环境中");
+    return api.checkPrediction()
+      .then((statusData) => {
+        setPredictionStatus(statusData);
+        setStatus(statusData.ready ? "Kronos 环境检查通过" : "Kronos 环境检查未通过");
+        return statusData;
+      })
+      .catch((error) => {
+        setStatus("Kronos 环境检查失败");
         throw error;
       });
   };
@@ -200,10 +240,11 @@ export default function App() {
   };
 
   useEffect(() => {
-    Promise.all([api.summary(), api.positions(), api.marketPeriods()])
-      .then(([summaryData, positionData, periodData]) => {
+    Promise.all([api.summary(), api.positions(), api.watchlist(), api.marketPeriods()])
+      .then(([summaryData, positionData, watchData, periodData]) => {
         setSummary(summaryData);
         setPositions(positionData);
+        setWatchlist(watchData);
         setPeriods(periodData);
         setStatus("基础数据已加载");
       })
@@ -270,6 +311,7 @@ export default function App() {
         <HomePage
           summary={summary}
           positions={positions}
+          watchlist={watchlist}
           bars={bars}
           risk={risk}
           decision={decision}
@@ -279,6 +321,8 @@ export default function App() {
           onPeriodChange={setPeriod}
           onPortfolioChange={reloadPortfolio}
           onRenamePosition={renamePosition}
+          onAddWatchItem={addWatchItem}
+          onDeleteWatchItem={deleteWatchItem}
           onRefreshMarket={reloadMarket}
           marketStatus={marketStatus}
           periods={periods}
@@ -299,6 +343,7 @@ export default function App() {
             setSelectedSymbol(symbol);
             setTab("home");
           }}
+          onWatch={(symbol) => addWatchItem(symbol, "雷达")}
         />
       )}
       {tab === "review" && <ReviewPage trades={trades} positions={positions} summary={summary} selectedSymbol={selectedSymbol} result={backtest} onRun={runBacktest} />}
@@ -323,6 +368,7 @@ export default function App() {
           onSaveMarketSettings={saveMarketSettings}
           predictionStatus={predictionStatus}
           onSavePredictionSettings={savePredictionSettings}
+          onCheckPredictionEnvironment={checkPredictionEnvironment}
         />
       )}
     </div>
@@ -332,6 +378,7 @@ export default function App() {
 function HomePage(props: {
   summary: PortfolioSummary;
   positions: Position[];
+  watchlist: WatchItem[];
   bars: PriceBar[];
   risk: RiskAdvice | null;
   decision: DecisionCenter | null;
@@ -341,6 +388,8 @@ function HomePage(props: {
   onPeriodChange: (period: string) => void;
   onPortfolioChange: () => Promise<void>;
   onRenamePosition: (symbol: string, name: string) => Promise<void>;
+  onAddWatchItem: (symbol: string, tags?: string) => Promise<void>;
+  onDeleteWatchItem: (symbol: string) => Promise<void>;
   onRefreshMarket: () => Promise<void>;
   marketStatus: MarketStatus | null;
   periods: MarketPeriod[];
@@ -478,6 +527,29 @@ function HomePage(props: {
     }
   };
 
+  const addQuoteToWatch = async () => {
+    const symbol = quoteSymbol.replace(/\D/g, "");
+    if (symbol.length !== 6) {
+      setFormStatus("请输入 6 位股票代码后加入自选。");
+      return;
+    }
+    try {
+      await props.onAddWatchItem(symbol);
+      setFormStatus("已加入自选观察");
+    } catch (error) {
+      setFormStatus(error instanceof Error ? error.message : "加入自选失败。");
+    }
+  };
+
+  const removeWatch = async (symbol: string) => {
+    try {
+      await props.onDeleteWatchItem(symbol);
+      setFormStatus("已移除自选观察");
+    } catch (error) {
+      setFormStatus(error instanceof Error ? error.message : "移除自选失败。");
+    }
+  };
+
   return (
     <>
       <section className="metrics-grid">
@@ -495,6 +567,7 @@ function HomePage(props: {
             <button onClick={() => symbolInputRef.current?.focus()}>+ 添加</button>
           </div>
           <div className="stock-list">
+            <div className="list-section-label">持仓</div>
             {props.positions.map((position) => (
               <div
                 key={position.symbol}
@@ -510,6 +583,21 @@ function HomePage(props: {
                 <button className="rename-button" onClick={() => renamePosition(position)}>改名</button>
               </div>
             ))}
+            {props.positions.length === 0 && <p className="empty-list">暂无真实持仓。</p>}
+            <div className="list-section-label">自选观察</div>
+            {props.watchlist.map((item) => (
+              <div
+                key={item.symbol}
+                className={`stock-row ${props.selectedSymbol === item.symbol ? "selected" : ""}`}
+              >
+                <button className="stock-select" onClick={() => props.onSelectSymbol(item.symbol)}>
+                  <strong>{item.name}</strong>
+                  <small>{item.symbol} · {item.tags || "观察"} · {item.last_price.toFixed(2)}</small>
+                </button>
+                <button className="rename-button" onClick={() => removeWatch(item.symbol)}>移除</button>
+              </div>
+            ))}
+            {props.watchlist.length === 0 && <p className="empty-list">暂无自选观察。</p>}
           </div>
           <div className="entry-form">
             <h3>账户录入</h3>
@@ -576,6 +664,7 @@ function HomePage(props: {
                   inputMode="numeric"
                 />
                 <button className="refresh-button" onClick={openQuoteSymbol}>查看K线</button>
+                <button className="refresh-button" onClick={addQuoteToWatch}>加入自选</button>
               </div>
               <div className="periods">
                 {props.periods.map((item) => (
@@ -1434,6 +1523,7 @@ function ScreenerPage(props: {
   onRefresh: () => Promise<void>;
   onSaveSymbols: (symbols: string[]) => Promise<void>;
   onOpen: (symbol: string) => void;
+  onWatch: (symbol: string) => Promise<void>;
 }) {
   const [view, setView] = useState<"lists" | "manage">("lists");
   const [newSymbol, setNewSymbol] = useState("");
@@ -1447,7 +1537,7 @@ function ScreenerPage(props: {
   const progress = props.status?.total_count ? Math.round((props.status.processed_count / props.status.total_count) * 100) : 0;
   const isScanning = props.status?.scan_status === "running" || props.status?.scan_status === "queued";
   const configuredSymbols = props.config?.symbols ?? [];
-  const activeSymbols = props.status?.symbols ?? (configuredSymbols.length > 0 ? configuredSymbols : defaultScreenerSymbols);
+  const activeSymbols = configuredSymbols.length > 0 ? configuredSymbols : [];
   const isUsingDefaultPool = configuredSymbols.length === 0;
 
   const saveSymbols = async (symbols: string[], message: string) => {
@@ -1462,35 +1552,33 @@ function ScreenerPage(props: {
       setManageStatus("请输入 6 位股票代码。");
       return;
     }
-    const base = isUsingDefaultPool ? activeSymbols : configuredSymbols;
-    await saveSymbols([...base, symbol], "股票池已新增并刷新。");
+    await saveSymbols([...configuredSymbols, symbol], "观察池已新增。全市场扫描范围不受影响。");
     setNewSymbol("");
   };
 
   const removeSymbol = async (symbol: string) => {
-    const base = isUsingDefaultPool ? activeSymbols : configuredSymbols;
-    await saveSymbols(base.filter((item) => item !== symbol), "股票池已删除并刷新。");
+    await saveSymbols(configuredSymbols.filter((item) => item !== symbol), "观察池已删除。");
   };
 
   const resetPool = async () => {
     await props.onSaveSymbols([]);
-    setManageStatus("已恢复默认核心池。");
+    setManageStatus("已清空观察池。选股雷达继续使用全市场扫描。");
   };
 
   return (
     <main className="screener-grid">
       <aside className="panel filters">
         <h2>筛选条件</h2>
-        <Filter label="市场" value="沪深 A 股核心池" />
+        <Filter label="市场" value="沪深 A 股全市场" />
         <Filter label="周期" value="短线 / 波段" />
         <Filter label="策略" value="趋势追强 + 超跌修复" />
         <Filter label="流动性" value="5日均额 > 3000 万" />
         <Filter label="风险过滤" value="开启" />
-        <Filter label="扫描范围" value={props.status?.scope === "full_market" ? "全市场" : props.status?.scope === "custom" ? "自定义" : "核心池"} />
-        <Filter label="股票池" value={`${props.status?.pool_size ?? 0} 只`} />
+        <Filter label="扫描范围" value={props.status?.scope === "full_market" ? "全市场" : props.status?.scope === "env_limited" ? "环境变量限制" : "全市场"} />
+        <Filter label="扫描规模" value={`${props.status?.pool_size ?? 0} 只`} />
         <Filter label="市场环境" value={`${props.status?.market_environment ?? "未知"} · ${(props.status?.market_factor ?? 1).toFixed(2)}x`} />
         <Filter label="缓存年龄" value={cacheAge} />
-        <div className="filter-note">默认自动获取 A 股全市场股票池并后台分批扫描，页面读取最近缓存结果；自定义股票池可用于缩小扫描范围。</div>
+        <div className="filter-note">选股雷达默认自动获取 A 股全市场股票池并后台扫描；观察池只用于记录重点关注，不会缩小雷达扫描范围。</div>
         <div className="scan-progress">
           <span>{props.status?.scan_status === "queued" ? "等待扫描启动" : isScanning ? `扫描中 ${progress}%` : props.status?.scan_status === "ready" ? "扫描完成" : "等待扫描"}</span>
           <strong>{props.status?.processed_count ?? 0}/{props.status?.total_count ?? 0}</strong>
@@ -1499,7 +1587,7 @@ function ScreenerPage(props: {
         </div>
         <div className="side-actions">
           <button className="primary-action" onClick={props.onRefresh} disabled={isScanning}>{isScanning ? "扫描中" : "全市场扫描"}</button>
-          <button className="secondary-action" onClick={() => setView("manage")}>管理股票池</button>
+          <button className="secondary-action" onClick={() => setView("manage")}>管理观察池</button>
         </div>
       </aside>
       <section className="screener-main">
@@ -1517,17 +1605,17 @@ function ScreenerPage(props: {
         </div>
         {view === "lists" ? (
           <div className="lists-grid">
-            <ResultList title="趋势追强榜" subtitle="找正在走强的行业龙头和趋势候选" rows={props.trend} onOpen={props.onOpen} />
-            <ResultList title="超跌反弹榜" subtitle="找跌幅充分但出现企稳迹象的候选" rows={props.rebound} onOpen={props.onOpen} />
+            <ResultList title="趋势追强榜" subtitle="找正在走强的行业龙头和趋势候选" rows={props.trend} onOpen={props.onOpen} onWatch={props.onWatch} />
+            <ResultList title="超跌反弹榜" subtitle="找跌幅充分但出现企稳迹象的候选" rows={props.rebound} onOpen={props.onOpen} onWatch={props.onWatch} />
           </div>
         ) : (
           <section className="panel pool-manager">
             <div className="panel-title">
               <div>
-                <h2>股票池管理</h2>
-                <p>{isUsingDefaultPool ? "当前使用默认核心池。删除任意代码后会转为自定义股票池。" : "当前使用自定义股票池。"}</p>
+                <h2>观察池管理</h2>
+                <p>{isUsingDefaultPool ? "观察池为空。雷达仍按全市场扫描。" : "观察池用于重点跟踪，不影响全市场扫描。"}</p>
               </div>
-              <button onClick={resetPool}>恢复默认</button>
+              <button onClick={resetPool}>清空观察池</button>
             </div>
             <div className="pool-add">
               <input value={newSymbol} onChange={(event) => setNewSymbol(event.target.value)} placeholder="输入 6 位代码" inputMode="numeric" />
@@ -1540,6 +1628,7 @@ function ScreenerPage(props: {
                   <button onClick={() => removeSymbol(symbol)}>删除</button>
                 </div>
               ))}
+              {activeSymbols.length === 0 && <p>暂无观察代码。后续自选观察会统一迁移到这里。</p>}
             </div>
             {manageStatus && <p>{manageStatus}</p>}
           </section>
@@ -1549,7 +1638,7 @@ function ScreenerPage(props: {
   );
 }
 
-function ResultList(props: { title: string; subtitle: string; rows: ScreenerResult[]; onOpen: (symbol: string) => void }) {
+function ResultList(props: { title: string; subtitle: string; rows: ScreenerResult[]; onOpen: (symbol: string) => void; onWatch: (symbol: string) => Promise<void> }) {
   const [showFactors, setShowFactors] = useState(false);
   return (
     <section className="panel result-list">
@@ -1573,7 +1662,10 @@ function ResultList(props: { title: string; subtitle: string; rows: ScreenerResu
                 <td className={row.change_pct >= 0 ? "up" : "down"}>{row.change_pct >= 0 ? "+" : ""}{row.change_pct.toFixed(2)}%</td>
                 <td>{row.reason}</td>
                 <td>{row.risk_status}</td>
-                <td><button className="link-button" onClick={() => props.onOpen(row.symbol)}>主页看K线</button></td>
+                <td>
+                  <button className="link-button" onClick={() => props.onOpen(row.symbol)}>主页看K线</button>
+                  <button className="link-button" onClick={() => props.onWatch(row.symbol)}>加入自选</button>
+                </td>
               </tr>
               {showFactors && (
                 <tr className="factor-row">
@@ -1790,7 +1882,7 @@ function PredictionPage(props: {
       <main className="prediction-grid">
         <section className="panel prediction-empty">
           <h2>预测功能未启用</h2>
-          <p>在设置中打开预测功能后，系统会自动安装 Kronos 模型和独立运行环境。安装完成后这里会显示 K 线预测。</p>
+          <p>在设置中打开预测功能，并按手动命令安装 Kronos 环境。检查通过后这里会显示 K 线预测。</p>
           <button className="primary-action" onClick={props.onOpenSettings}>去设置开启</button>
         </section>
       </main>
@@ -1801,11 +1893,11 @@ function PredictionPage(props: {
     return (
       <main className="prediction-grid">
         <section className="panel prediction-empty">
-          <h2>预测环境准备中</h2>
+          <h2>预测环境未就绪</h2>
           <p>当前状态：{props.status.install_status}。模型：{props.status.model_name}。</p>
           <p>运行目录：{props.status.runtime_path}</p>
           {props.status.last_error && <p>错误：{props.status.last_error}</p>}
-          <button className="primary-action" onClick={props.onOpenSettings}>查看设置</button>
+          <button className="primary-action" onClick={props.onOpenSettings}>查看安装命令</button>
         </section>
       </main>
     );
@@ -1889,6 +1981,7 @@ function SettingsPage(props: {
   onSaveMarketSettings: (provider: string, tushareToken: string) => Promise<void>;
   predictionStatus: PredictionStatus | null;
   onSavePredictionSettings: (enabled: boolean, modelName: string) => Promise<PredictionStatus>;
+  onCheckPredictionEnvironment: () => Promise<PredictionStatus>;
 }) {
   const [symbolsText, setSymbolsText] = useState((props.screenerConfig?.symbols ?? []).join(", "));
   const [marketProvider, setMarketProvider] = useState(props.marketSettings?.provider ?? "auto");
@@ -1916,7 +2009,7 @@ function SettingsPage(props: {
     const symbols = symbolsText.split(/[\s,，]+/).map((symbol) => symbol.trim()).filter(Boolean);
     try {
       await props.onSaveScreenerSymbols(symbols);
-      setSettingsStatus("股票池已保存并刷新。");
+      setSettingsStatus("观察池已保存。选股雷达继续按全市场扫描。");
     } catch {
       setSettingsStatus("保存失败，请检查股票代码。");
     }
@@ -1925,9 +2018,18 @@ function SettingsPage(props: {
   const savePrediction = async () => {
     try {
       await props.onSavePredictionSettings(predictionEnabled, predictionModel);
-      setPredictionSettingsStatus(predictionEnabled ? "预测功能已启用，正在准备 Kronos 环境。" : "预测功能已关闭。");
+      setPredictionSettingsStatus(predictionEnabled ? "预测功能已启用。请按下方命令手动安装，然后点击检查环境。" : "预测功能已关闭。");
     } catch {
       setPredictionSettingsStatus("预测设置保存失败。");
+    }
+  };
+
+  const checkPrediction = async () => {
+    try {
+      const status = await props.onCheckPredictionEnvironment();
+      setPredictionSettingsStatus(status.ready ? "Kronos 环境检查通过。" : "Kronos 环境检查未通过，请查看错误和命令。");
+    } catch {
+      setPredictionSettingsStatus("Kronos 环境检查失败。");
     }
   };
 
@@ -1989,11 +2091,12 @@ function SettingsPage(props: {
       <section className="panel settings-card">
         <h2>选股雷达</h2>
         <label>
-          扫描股票池
+          重点观察池
           <textarea value={symbolsText} onChange={(event) => setSymbolsText(event.target.value)} rows={8} placeholder="300308, 300502, 601138" />
         </label>
-        <button className="primary-action" onClick={saveSymbols}>保存并刷新</button>
-        <MiniStat label="当前股票池" value={`${props.screenerStatus?.pool_size ?? 0} 只`} />
+        <button className="primary-action" onClick={saveSymbols}>保存观察池</button>
+        <MiniStat label="全市场扫描规模" value={`${props.screenerStatus?.pool_size ?? 0} 只`} />
+        <MiniStat label="观察池" value={`${props.screenerConfig?.symbols.length ?? 0} 只`} />
         <MiniStat label="最近耗时" value={props.screenerStatus?.last_duration_seconds == null ? "--" : `${props.screenerStatus.last_duration_seconds} 秒`} />
         {settingsStatus && <p>{settingsStatus}</p>}
       </section>
@@ -2011,8 +2114,19 @@ function SettingsPage(props: {
           </select>
         </label>
         <button className="primary-action" onClick={savePrediction}>保存预测设置</button>
+        <button className="refresh-button" onClick={checkPrediction}>检查环境</button>
         <MiniStat label="安装状态" value={props.predictionStatus?.install_status ?? "not_installed"} />
         <MiniStat label="运行目录" value={props.predictionStatus?.runtime_path ?? "--"} />
+        <div className="settings-static">
+          {(props.predictionStatus?.environment_checks ?? []).map((item) => (
+            <MiniStat key={item} label="检查项" value={item} />
+          ))}
+        </div>
+        <div className="command-list">
+          {(props.predictionStatus?.install_commands ?? []).map((command) => (
+            <code key={command}>{command}</code>
+          ))}
+        </div>
         {predictionSettingsStatus && <p>{predictionSettingsStatus}</p>}
         {props.predictionStatus?.last_error && <p>{props.predictionStatus.last_error}</p>}
       </section>

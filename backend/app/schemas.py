@@ -23,6 +23,19 @@ class PositionNameUpdate(BaseModel):
     name: str = Field(min_length=1, max_length=32)
 
 
+class WatchItemCreate(BaseModel):
+    symbol: str
+    name: str = ""
+    tags: str = ""
+    note: str = ""
+
+
+class WatchItem(WatchItemCreate):
+    last_price: float
+    created_at: datetime
+    updated_at: datetime
+
+
 class TradeRecord(BaseModel):
     id: int
     symbol: str
@@ -234,6 +247,8 @@ class PredictionSettingsUpdate(BaseModel):
 class PredictionStatus(PredictionSettings):
     runtime_path: str
     ready: bool
+    install_commands: list[str] = []
+    environment_checks: list[str] = []
 
 
 class PredictionResult(BaseModel):

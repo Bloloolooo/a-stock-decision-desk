@@ -1,4 +1,5 @@
 from datetime import date, datetime, timedelta
+from types import SimpleNamespace
 
 import app.services.screener as screener_module
 from app.schemas import PriceBar
@@ -74,6 +75,15 @@ def test_screener_scores_real_bars(monkeypatch, tmp_path) -> None:
 def test_screener_config_persists_and_invalid_symbols_are_ignored(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("STOCK_TOOL_DB_PATH", str(tmp_path / "test.sqlite3"))
     monkeypatch.setenv("SCREENER_SYMBOLS", "")
+    monkeypatch.setattr(
+        screener_module,
+        "stock_universe",
+        lambda: [
+            SimpleNamespace(symbol="000001", name="一号"),
+            SimpleNamespace(symbol="000002", name="二号"),
+            SimpleNamespace(symbol="000003", name="三号"),
+        ],
+    )
     service = ScreenerService()
 
     config = service.update_config([" 000001 ", "bad", "600519", "600519"])
@@ -81,4 +91,5 @@ def test_screener_config_persists_and_invalid_symbols_are_ignored(monkeypatch, t
 
     assert config.symbols == ["000001", "600519"]
     assert fresh_service.config().symbols == ["000001", "600519"]
-    assert fresh_service.status().pool_size == 2
+    assert fresh_service.status().pool_size == 3
+    assert fresh_service.status().scope == "full_market"

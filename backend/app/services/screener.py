@@ -81,8 +81,7 @@ class ScreenerService:
         cached = self._cached_results(normalized_type)
         if cached:
             return cached
-        symbols = self._core_pool() if self._scope() == "full_market" else self._pool()
-        self._scan_symbols(symbols, scope="initial", persist=True)
+        self._scan_symbols(self._pool(), scope=self._scope(), persist=True)
         return self._cached_results(normalized_type)
 
     def refresh(self) -> ScreenerStatus:
@@ -236,14 +235,10 @@ class ScreenerService:
         return signals
 
     def _pool(self) -> list[str]:
-        config_symbols = self.config().symbols
         env_symbols = self._normalize_symbols(os.getenv("SCREENER_SYMBOLS", "").split(","))
-        if config_symbols or env_symbols:
-            symbols = config_symbols or env_symbols
-        else:
-            symbols = self._full_market_symbols()
-            if not symbols:
-                symbols = DEFAULT_POOL
+        symbols = env_symbols or self._full_market_symbols()
+        if not symbols:
+            symbols = DEFAULT_POOL
         max_symbols = int(os.getenv("SCREENER_MAX_SYMBOLS", "0") or "0")
         if max_symbols > 0:
             symbols = symbols[:max_symbols]
@@ -264,7 +259,7 @@ class ScreenerService:
 
     def _scope(self) -> str:
         env_symbols = self._normalize_symbols(os.getenv("SCREENER_SYMBOLS", "").split(","))
-        return "custom" if self.config().symbols or env_symbols else "full_market"
+        return "env_limited" if env_symbols else "full_market"
 
     def _normalize_symbols(self, symbols: list[str]) -> list[str]:
         seen: set[str] = set()

@@ -69,7 +69,13 @@ class PredictionService:
     def status(self) -> PredictionStatus:
         settings = self.settings()
         ready = settings.enabled and settings.install_status == "ready" and self._runtime_ready()
-        return PredictionStatus(**settings.model_dump(), runtime_path=str(RUNTIME_PATH), ready=ready)
+        return PredictionStatus(
+            **settings.model_dump(),
+            runtime_path=str(RUNTIME_PATH),
+            ready=ready,
+            install_commands=self.install_commands(settings.model_name),
+            environment_checks=self._environment_check_lines(),
+        )
 
     def settings(self) -> PredictionSettings:
         with get_connection() as connection:
@@ -104,6 +110,8 @@ class PredictionService:
             install_status = current.install_status
             if not enabled:
                 install_status = "not_installed" if install_status == "installing" else install_status
+            elif install_status in {"not_installed", "installing", "failed"}:
+                install_status = "manual_required"
             connection.execute(
                 """
                 UPDATE prediction_settings
@@ -112,19 +120,51 @@ class PredictionService:
                 """,
                 (1 if enabled else 0, model, DEFAULT_TOKENIZER, install_status),
             )
-        if enabled and not self.status().ready:
-            self.install_async()
+        return self.status()
+
+    def install_commands(self, model_name: str = DEFAULT_MODEL) -> list[str]:
+        model = model_name.strip() or DEFAULT_MODEL
+        if os.name == "nt":
+            return [
+                "cd backend",
+                r"py -3.11 -m venv .kronos_runtime\.venv",
+                r".kronos_runtime\.venv\Scripts\python.exe -m ensurepip --upgrade",
+                r".kronos_runtime\.venv\Scripts\python.exe -m pip install --upgrade pip",
+                r"git clone --depth 1 https://github.com/shiyu-coder/Kronos.git .kronos_runtime\Kronos",
+                r".kronos_runtime\.venv\Scripts\python.exe -m pip install -r .kronos_runtime\Kronos\requirements.txt",
+                (
+                    r".kronos_runtime\.venv\Scripts\python.exe -c "
+                    f"\"from huggingface_hub import snapshot_download; snapshot_download({model!r}); snapshot_download({DEFAULT_TOKENIZER!r})\""
+                ),
+            ]
+        return [
+            "cd backend",
+            "python3.11 -m venv .kronos_runtime/.venv",
+            ".kronos_runtime/.venv/bin/python -m ensurepip --upgrade",
+            ".kronos_runtime/.venv/bin/python -m pip install --upgrade pip",
+            "git clone --depth 1 https://github.com/shiyu-coder/Kronos.git .kronos_runtime/Kronos",
+            ".kronos_runtime/.venv/bin/python -m pip install -r .kronos_runtime/Kronos/requirements.txt",
+            (
+                ".kronos_runtime/.venv/bin/python -c "
+                f"\"from huggingface_hub import snapshot_download; snapshot_download({model!r}); snapshot_download({DEFAULT_TOKENIZER!r})\""
+            ),
+        ]
+
+    def check_environment(self) -> PredictionStatus:
+        settings = self.settings()
+        try:
+            self._assert_runtime_usable(settings.model_name)
+        except RuntimeError as exc:
+            self._set_install_status("failed", str(exc)[-500:])
+            return self.status()
+        self._set_install_status("ready", None)
         return self.status()
 
     def install_async(self) -> PredictionStatus:
-        settings = self.settings()
-        if settings.install_status == "ready" and self._runtime_ready():
-            return self.status()
-        if not self._install_lock.acquire(blocking=False):
-            return self.status()
-        self._set_install_status("installing", None)
-        thread = threading.Thread(target=self._install, daemon=True)
-        thread.start()
+        self._set_install_status(
+            "manual_required",
+            "自动安装已取消。请按设置页的命令手动安装 Kronos 后点击“检查环境”。",
+        )
         return self.status()
 
     def predict(self, symbol: str, horizon: int = 20) -> PredictionResult:
@@ -404,6 +444,43 @@ class PredictionService:
         if "huggingface" in lowered or "model" in lowered or "401" in lowered or "403" in lowered:
             hints.append("HuggingFace 模型访问失败，请确认网络可访问 huggingface.co，必要时配置 HF_TOKEN 或镜像/代理。")
         return f"；建议：{'；'.join(dict.fromkeys(hints))}" if hints else ""
+
+    def _environment_check_lines(self) -> list[str]:
+        checks = [
+            f"运行目录：{RUNTIME_PATH}",
+            f"Kronos 源码：{'已找到' if self._repo_ready() else '未找到'}",
+            f"虚拟环境 Python：{'已找到' if self._venv_python_path().exists() else '未找到'}",
+        ]
+        if self._venv_python_path().exists():
+            checks.append(f"pip：{'可用' if self._pip_ready(self._venv_python()) else '不可用'}")
+        return checks
+
+    def _assert_runtime_usable(self, model_name: str) -> None:
+        if not self._repo_ready():
+            raise RuntimeError(f"未找到 Kronos 源码或 requirements.txt：{REPO_PATH}")
+        if not self._venv_python_path().exists():
+            raise RuntimeError(f"未找到虚拟环境 Python：{self._venv_python_path()}")
+        python = self._venv_python()
+        if not self._pip_ready(python):
+            raise RuntimeError("虚拟环境 pip 不可用。请先执行安装命令中的 ensurepip 和 pip upgrade。")
+        script = (
+            "import sys\n"
+            "from huggingface_hub import snapshot_download\n"
+            f"sys.path.insert(0, {str(REPO_PATH)!r})\n"
+            "import pandas\n"
+            "from model import Kronos, KronosTokenizer, KronosPredictor\n"
+            f"snapshot_download({model_name!r}, local_files_only=True)\n"
+            f"snapshot_download({DEFAULT_TOKENIZER!r}, local_files_only=True)\n"
+            "print('ok')\n"
+        )
+        try:
+            subprocess.run([python, "-c", script], check=True, capture_output=True, text=True, timeout=120)
+        except subprocess.CalledProcessError as exc:
+            detail = (exc.stderr or exc.stdout or "无输出").strip()
+            hint = self._install_failure_hint("检查 Kronos 环境", detail, exc.returncode)
+            raise RuntimeError(f"Kronos 环境检查失败：{detail[-800:]}{hint}") from exc
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError("Kronos 环境检查超时。请确认虚拟环境和模型缓存可用。") from exc
 
     def _run_kronos(self, symbol: str, history: list[PriceBar], horizon: int) -> list[PriceBar]:
         self._write_runner()

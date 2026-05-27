@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException
 
-from app.schemas import CashUpdate, PortfolioSummary, Position, PositionCreate, PositionNameUpdate, PositionSell, TradeRecord
+from app.schemas import CashUpdate, PortfolioSummary, Position, PositionCreate, PositionNameUpdate, PositionSell, TradeRecord, WatchItem, WatchItemCreate
 from app.services.portfolio import portfolio_service
 
 router = APIRouter()
@@ -25,6 +25,28 @@ def get_positions() -> list[Position]:
 @router.get("/trades", response_model=list[TradeRecord])
 def get_trade_records(limit: int = 100) -> list[TradeRecord]:
     return portfolio_service.trade_records(limit=min(max(limit, 1), 300))
+
+
+@router.get("/watchlist", response_model=list[WatchItem])
+def get_watchlist() -> list[WatchItem]:
+    return portfolio_service.watchlist()
+
+
+@router.post("/watchlist", response_model=WatchItem)
+def add_watch_item(payload: WatchItemCreate) -> WatchItem:
+    try:
+        return portfolio_service.add_watch_item(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.delete("/watchlist/{symbol}", response_model=list[WatchItem])
+def delete_watch_item(symbol: str) -> list[WatchItem]:
+    try:
+        portfolio_service.delete_watch_item(symbol)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return portfolio_service.watchlist()
 
 
 @router.post("/positions", response_model=Position)

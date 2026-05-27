@@ -2,7 +2,7 @@ from datetime import datetime
 from sqlite3 import Connection, Row
 
 from app.db import get_connection, init_db
-from app.schemas import PortfolioSummary, Position, PositionCreate, PositionSell, TradeRecord
+from app.schemas import PortfolioSummary, Position, PositionCreate, PositionSell, TradeRecord, WatchItem, WatchItemCreate
 from app.services.market_data import market_data
 
 
@@ -169,6 +169,53 @@ class PortfolioService:
             )
         return self._position_view(updated)
 
+    def add_watch_item(self, payload: WatchItemCreate) -> WatchItem:
+        symbol = _normalize_symbol(payload.symbol)
+        name = payload.name.strip() or market_data.name(symbol)
+        tags = payload.tags.strip()
+        note = payload.note.strip()
+        with get_connection() as connection:
+            connection.execute(
+                """
+                INSERT INTO watchlist (symbol, name, tags, note, created_at, updated_at)
+                VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))
+                ON CONFLICT(symbol) DO UPDATE SET
+                    name = excluded.name,
+                    tags = excluded.tags,
+                    note = excluded.note,
+                    updated_at = excluded.updated_at
+                """,
+                (symbol, name, tags, note),
+            )
+        return self._watch_item_view(WatchItemCreate(symbol=symbol, name=name, tags=tags, note=note))
+
+    def watchlist(self) -> list[WatchItem]:
+        with get_connection() as connection:
+            rows = connection.execute(
+                """
+                SELECT symbol, name, tags, note, created_at, updated_at
+                FROM watchlist
+                ORDER BY datetime(updated_at) DESC, symbol
+                """
+            ).fetchall()
+        return [
+            WatchItem(
+                symbol=row["symbol"],
+                name=row["name"],
+                tags=row["tags"],
+                note=row["note"],
+                last_price=round(market_data.latest_price(row["symbol"]), 2),
+                created_at=datetime.fromisoformat(row["created_at"]),
+                updated_at=datetime.fromisoformat(row["updated_at"]),
+            )
+            for row in rows
+        ]
+
+    def delete_watch_item(self, symbol: str) -> None:
+        normalized_symbol = _normalize_symbol(symbol)
+        with get_connection() as connection:
+            connection.execute("DELETE FROM watchlist WHERE symbol = ?", (normalized_symbol,))
+
     def positions(self) -> list[Position]:
         with get_connection() as connection:
             rows = connection.execute(
@@ -254,6 +301,18 @@ class PortfolioService:
             floating_pnl=round(floating_pnl, 2),
             floating_pnl_pct=round(floating_pnl_pct, 4),
             updated_at=datetime.now(),
+        )
+
+    def _watch_item_view(self, payload: WatchItemCreate) -> WatchItem:
+        now = datetime.now()
+        return WatchItem(
+            symbol=payload.symbol,
+            name=payload.name,
+            tags=payload.tags,
+            note=payload.note,
+            last_price=round(market_data.latest_price(payload.symbol), 2),
+            created_at=now,
+            updated_at=now,
         )
 
 

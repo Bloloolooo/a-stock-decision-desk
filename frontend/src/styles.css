@@ -193,6 +193,19 @@ button {
   margin-top: 12px;
 }
 
+.list-section-label {
+  margin-top: 6px;
+  color: #68758a;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.empty-list {
+  margin: 0;
+  color: #7a8798;
+  font-size: 12px;
+}
+
 .stock-row {
   width: 100%;
   display: grid;
@@ -1131,6 +1144,23 @@ td small {
 .settings-static {
   display: grid;
   gap: 8px;
+}
+
+.command-list {
+  display: grid;
+  gap: 6px;
+}
+
+.command-list code {
+  display: block;
+  overflow-x: auto;
+  border: 1px solid #d8e1ec;
+  border-radius: 6px;
+  padding: 8px;
+  background: #0f1724;
+  color: #dbeafe;
+  font-size: 12px;
+  white-space: nowrap;
 }
 
 .inline-setting {
