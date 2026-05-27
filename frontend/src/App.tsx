@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
-import { createChart, ColorType, LineStyle, type IChartApi, type UTCTimestamp } from "lightweight-charts";
+import { createChart, ColorType, LineStyle, type IChartApi, type MouseEventParams, type Time, type UTCTimestamp } from "lightweight-charts";
 
 import { api } from "./api";
 import type { BacktestRequest, BacktestResult, DecisionCenter, MarketPeriod, MarketSettings, MarketStatus, PortfolioSummary, Position, PredictionResult, PredictionStatus, PriceBar, RiskAdvice, ScreenerConfig, ScreenerResult, ScreenerStatus, TradeRecord } from "./types";
@@ -46,6 +46,10 @@ function yuan(value: number) {
 
 function moneyInput(value: number) {
   return Number.isFinite(value) ? value.toFixed(2) : "";
+}
+
+function parseNumberInput(value: string) {
+  return Number(value.trim().replace(/,/g, "").replace(/，/g, "").replace(/。/g, "."));
 }
 
 function pct(value: number) {
@@ -360,6 +364,7 @@ function HomePage(props: {
   });
   const [fullscreen, setFullscreen] = useState(false);
   const [formStatus, setFormStatus] = useState("");
+  const [tradeSubmitting, setTradeSubmitting] = useState<"buy" | "sell" | null>(null);
 
   useEffect(() => {
     setCashValue(moneyInput(props.summary.cash));
@@ -382,7 +387,7 @@ function HomePage(props: {
   }, [fullscreen]);
 
   const saveCash = async () => {
-    const cash = Number(cashValue);
+    const cash = parseNumberInput(cashValue);
     if (!Number.isFinite(cash) || cash < 0) {
       setFormStatus("现金格式有误，请输入大于等于 0 的数字。");
       return;
@@ -393,14 +398,17 @@ function HomePage(props: {
   };
 
   const savePosition = async () => {
+    if (tradeSubmitting) return;
     try {
+      setTradeSubmitting("buy");
       const symbol = positionForm.symbol.replace(/\D/g, "");
-      const quantity = Number(positionForm.quantity);
-      const averageCost = Number(positionForm.average_cost);
+      const quantity = parseNumberInput(positionForm.quantity);
+      const averageCost = parseNumberInput(positionForm.average_cost);
       if (symbol.length !== 6 || !Number.isInteger(quantity) || quantity <= 0 || !Number.isFinite(averageCost) || averageCost <= 0) {
         setFormStatus("买入信息有误，请输入 6 位代码、正整数数量和大于 0 的买入均价。");
         return;
       }
+      const refreshCurrentSymbol = symbol === props.selectedSymbol;
       await api.upsertPosition({
         symbol,
         quantity,
@@ -408,32 +416,45 @@ function HomePage(props: {
       });
       await props.onPortfolioChange();
       props.onSelectSymbol(symbol);
+      if (refreshCurrentSymbol) {
+        await props.onRefreshMarket();
+      }
       setPositionForm({ symbol: "", quantity: "", average_cost: "" });
       setFormStatus("买入已记录，现金和持仓已更新");
     } catch (error) {
       setFormStatus(error instanceof Error ? error.message : "买入失败，请检查代码、数量和后端连接。");
+    } finally {
+      setTradeSubmitting(null);
     }
   };
 
   const sellPosition = async () => {
+    if (tradeSubmitting) return;
     try {
+      setTradeSubmitting("sell");
       const symbol = sellForm.symbol.replace(/\D/g, "");
-      const quantity = Number(sellForm.quantity);
-      const sellPrice = Number(sellForm.sell_price);
+      const quantity = parseNumberInput(sellForm.quantity);
+      const sellPrice = parseNumberInput(sellForm.sell_price);
       if (symbol.length !== 6 || !Number.isInteger(quantity) || quantity <= 0 || !Number.isFinite(sellPrice) || sellPrice <= 0) {
         setFormStatus("卖出信息有误，请输入 6 位代码、正整数数量和大于 0 的卖出价格。");
         return;
       }
+      const refreshCurrentSymbol = symbol === props.selectedSymbol;
       await api.sellPosition({
         symbol,
         quantity,
         sell_price: sellPrice,
       });
       await props.onPortfolioChange();
+      if (refreshCurrentSymbol) {
+        await props.onRefreshMarket();
+      }
       setSellForm({ symbol: props.selectedSymbol, quantity: "", sell_price: "" });
       setFormStatus("卖出已记录");
     } catch (error) {
       setFormStatus(error instanceof Error ? error.message : "卖出失败，请检查持仓数量和后端连接。");
+    } finally {
+      setTradeSubmitting(null);
     }
   };
 
@@ -510,8 +531,8 @@ function HomePage(props: {
               买入均价
               <input value={positionForm.average_cost} onChange={(event) => setPositionForm({ ...positionForm, average_cost: event.target.value })} inputMode="decimal" />
             </label>
-            <button onClick={savePosition} disabled={!positionForm.symbol || !positionForm.quantity || !positionForm.average_cost}>
-              记录买入
+            <button onClick={savePosition} disabled={Boolean(tradeSubmitting) || !positionForm.symbol || !positionForm.quantity || !positionForm.average_cost}>
+              {tradeSubmitting === "buy" ? "买入处理中" : "记录买入"}
             </button>
             <span className="entry-hint">名称会根据代码自动匹配；买入会扣减现金并重算持仓均价。</span>
             {formStatus && <p>{formStatus}</p>}
@@ -528,8 +549,8 @@ function HomePage(props: {
               卖出价格
               <input value={sellForm.sell_price} onChange={(event) => setSellForm({ ...sellForm, sell_price: event.target.value })} inputMode="decimal" />
             </label>
-            <button onClick={sellPosition} disabled={!sellForm.symbol || !sellForm.quantity || !sellForm.sell_price}>
-              记录卖出
+            <button onClick={sellPosition} disabled={Boolean(tradeSubmitting) || !sellForm.symbol || !sellForm.quantity || !sellForm.sell_price}>
+              {tradeSubmitting === "sell" ? "卖出处理中" : "记录卖出"}
             </button>
           </div>
         </aside>
@@ -843,11 +864,21 @@ function chartDmi(bars: Array<{ high: number; low: number; close: number }>, win
 
 type MainChartType = "standard" | "boll" | "bbiboll";
 type SubChartType = "volume" | "macd" | "kdj" | "ratio" | "rsi" | "wr" | "psy" | "dmi";
+type ChartSeries =
+  | ReturnType<IChartApi["addLineSeries"]>
+  | ReturnType<IChartApi["addCandlestickSeries"]>
+  | ReturnType<IChartApi["addHistogramSeries"]>;
 
 function KLineChart({ bars, mode = "normal" }: { bars: PriceBar[]; mode?: "normal" | "fullscreen" }) {
   const [mainChart, setMainChart] = useState<MainChartType>("standard");
   const [subchart, setSubchart] = useState<SubChartType>("macd");
   const tooltipRef = useRef<HTMLDivElement | null>(null);
+  const mainContainerRef = useRef<HTMLDivElement | null>(null);
+  const subContainerRef = useRef<HTMLDivElement | null>(null);
+  const mainChartRef = useRef<IChartApi | null>(null);
+  const subChartRef = useRef<IChartApi | null>(null);
+  const mainSeriesRef = useRef<ChartSeries[]>([]);
+  const subSeriesRef = useRef<ChartSeries[]>([]);
   const isMinuteChart = bars.some((bar) => bar.timestamp.includes(" "));
   const chartData = useMemo(
     () => bars.map((bar) => ({
@@ -1024,6 +1055,202 @@ function KLineChart({ bars, mode = "normal" }: { bars: PriceBar[]; mode?: "norma
     { key: "dmi", label: "DMI" },
   ];
 
+  useEffect(() => {
+    const container = mainContainerRef.current;
+    if (!container) return undefined;
+    const priceScaleWidth = container.clientWidth < 560 ? 52 : 64;
+    const chart = createChart(container, {
+      layout: { background: { type: ColorType.Solid, color: "#0f1724" }, textColor: "#9aa8bd" },
+      grid: { vertLines: { color: "#1c2940" }, horzLines: { color: "#1c2940" } },
+      rightPriceScale: { borderColor: "#253145", minimumWidth: priceScaleWidth, scaleMargins: { top: 0.06, bottom: 0.08 } },
+      timeScale: { borderColor: "#253145", timeVisible: true, secondsVisible: false },
+      crosshair: { mode: 1, vertLine: { color: "#50647f", style: LineStyle.Dashed }, horzLine: { color: "#50647f", style: LineStyle.Dashed } },
+      width: container.clientWidth,
+      height: container.clientHeight,
+    });
+    mainChartRef.current = chart;
+    const resizeObserver = new ResizeObserver(() => {
+      const width = container.clientWidth;
+      const height = container.clientHeight;
+      chart.applyOptions({
+        width,
+        height,
+        rightPriceScale: { minimumWidth: width < 560 ? 52 : 64 },
+      });
+    });
+    resizeObserver.observe(container);
+    return () => {
+      resizeObserver.disconnect();
+      mainSeriesRef.current = [];
+      mainChartRef.current = null;
+      chart.remove();
+    };
+  }, [mode]);
+
+  useEffect(() => {
+    const container = subContainerRef.current;
+    if (!container) return undefined;
+    const subPriceScaleWidth = container.clientWidth < 560 ? 52 : 64;
+    const chart = createChart(container, {
+      layout: { background: { type: ColorType.Solid, color: "#101a2a" }, textColor: "#9aa8bd" },
+      grid: { vertLines: { color: "#1c2940" }, horzLines: { color: "#1c2940" } },
+      rightPriceScale: { borderColor: "#253145", minimumWidth: subPriceScaleWidth, scaleMargins: { top: 0.14, bottom: 0.12 } },
+      timeScale: { borderColor: "#253145", timeVisible: true, secondsVisible: false },
+      crosshair: { mode: 1, vertLine: { color: "#50647f", style: LineStyle.Dashed }, horzLine: { color: "#50647f", style: LineStyle.Dashed } },
+      width: container.clientWidth,
+      height: container.clientHeight,
+    });
+    subChartRef.current = chart;
+    const resizeObserver = new ResizeObserver(() => {
+      const width = container.clientWidth;
+      const height = container.clientHeight;
+      chart.applyOptions({
+        width,
+        height,
+        rightPriceScale: { minimumWidth: width < 560 ? 52 : 64 },
+      });
+    });
+    resizeObserver.observe(container);
+    return () => {
+      resizeObserver.disconnect();
+      subSeriesRef.current = [];
+      subChartRef.current = null;
+      chart.remove();
+    };
+  }, [mode]);
+
+  useEffect(() => {
+    const chart = mainChartRef.current;
+    if (!chart) return undefined;
+    mainSeriesRef.current.forEach((series) => chart.removeSeries(series));
+    mainSeriesRef.current = [];
+    if (chartData.length === 0) return undefined;
+    if (isMinuteChart) {
+      const lineSeries = chart.addLineSeries({ color: "#69a8ff", lineWidth: 2, priceScaleId: "right", priceFormat });
+      lineSeries.setData(lineData);
+      mainSeriesRef.current.push(lineSeries);
+      if (mainChart === "standard") {
+        const vwapSeries = chart.addLineSeries({ color: "#f0c04f", lineWidth: 1, priceScaleId: "right", priceFormat });
+        vwapSeries.setData(vwapData);
+        mainSeriesRef.current.push(vwapSeries);
+      }
+    }
+    if (!isMinuteChart) {
+      const candleSeries = chart.addCandlestickSeries({
+        upColor: "#d94b42",
+        downColor: "#14a06f",
+        borderUpColor: "#d94b42",
+        borderDownColor: "#14a06f",
+        wickUpColor: "#d94b42",
+        wickDownColor: "#14a06f",
+        priceScaleId: "right",
+        priceFormat,
+      });
+      candleSeries.setData(chartData);
+      mainSeriesRef.current.push(candleSeries);
+      if (mainChart === "standard") {
+        const maColors: Record<number, string> = { 5: "#f4d35e", 10: "#8ecae6", 20: "#c084fc", 60: "#f59e0b" };
+        maData.forEach((ma) => {
+          const series = chart.addLineSeries({ color: maColors[ma.window], lineWidth: 1, priceFormat, priceLineVisible: false, lastValueVisible: false });
+          series.setData(ma.data);
+          mainSeriesRef.current.push(series);
+        });
+      }
+    }
+    if (mainChart === "boll" || mainChart === "bbiboll") {
+      const activeBand = mainChart === "boll" ? bollData : bbiBollData;
+      const upperSeries = chart.addLineSeries({ color: "#f0b84f", lineWidth: 1, lineStyle: LineStyle.Dashed, priceFormat, priceLineVisible: false, lastValueVisible: false });
+      const middleSeries = chart.addLineSeries({ color: "#8ecae6", lineWidth: 2, priceFormat, priceLineVisible: false, lastValueVisible: false });
+      const lowerSeries = chart.addLineSeries({ color: "#f0b84f", lineWidth: 1, lineStyle: LineStyle.Dashed, priceFormat, priceLineVisible: false, lastValueVisible: false });
+      upperSeries.setData(activeBand.upper);
+      middleSeries.setData(activeBand.middle);
+      lowerSeries.setData(activeBand.lower);
+      mainSeriesRef.current.push(upperSeries, middleSeries, lowerSeries);
+    }
+    const handleCrosshairMove = (param: MouseEventParams<Time>) => {
+      const tooltip = tooltipRef.current;
+      if (!tooltip || !param.time) return;
+      const point = chartData.find((item) => item.time === param.time);
+      if (!point) return;
+      const changePct = point.open ? (point.close / point.open - 1) * 100 : 0;
+      tooltip.innerHTML = [
+        `<strong>${formatChartDate(point.raw)}</strong>`,
+        `<span>开 ${point.open.toFixed(2)}</span>`,
+        `<span>高 ${point.high.toFixed(2)}</span>`,
+        `<span>低 ${point.low.toFixed(2)}</span>`,
+        `<span>收 ${point.close.toFixed(2)}</span>`,
+        `<span class="${changePct >= 0 ? "up" : "down"}">${changePct >= 0 ? "+" : ""}${changePct.toFixed(2)}%</span>`,
+        `<span>量 ${point.volume.toLocaleString("zh-CN", { maximumFractionDigits: 0 })}</span>`,
+      ].join("");
+    };
+    chart.subscribeCrosshairMove(handleCrosshairMove);
+    chart.timeScale().fitContent();
+    return () => chart.unsubscribeCrosshairMove(handleCrosshairMove);
+  }, [bbiBollData, bollData, chartData, isMinuteChart, lineData, maData, mainChart, vwapData]);
+
+  useEffect(() => {
+    const chart = subChartRef.current;
+    if (!chart) return;
+    subSeriesRef.current.forEach((series) => chart.removeSeries(series));
+    subSeriesRef.current = [];
+    if (chartData.length === 0) return;
+    if (subchart === "volume") {
+      const series = chart.addHistogramSeries({ priceFormat: { type: "volume" }, lastValueVisible: true, priceLineVisible: false });
+      series.setData(volumeData);
+      subSeriesRef.current.push(series);
+    }
+    if (subchart === "macd") {
+      const histogram = chart.addHistogramSeries({ lastValueVisible: false, priceLineVisible: false });
+      const difSeries = chart.addLineSeries({ color: "#4ea4ff", lineWidth: 2, priceLineVisible: false });
+      const deaSeries = chart.addLineSeries({ color: "#f0b84f", lineWidth: 2, priceLineVisible: false });
+      histogram.setData(macdData.histogram);
+      difSeries.setData(macdData.dif);
+      deaSeries.setData(macdData.dea);
+      subSeriesRef.current.push(histogram, difSeries, deaSeries);
+    }
+    if (subchart === "kdj") {
+      const kSeries = chart.addLineSeries({ color: "#4ea4ff", lineWidth: 2, priceLineVisible: false });
+      const dSeries = chart.addLineSeries({ color: "#f0b84f", lineWidth: 2, priceLineVisible: false });
+      const jSeries = chart.addLineSeries({ color: "#d879ff", lineWidth: 2, priceLineVisible: false });
+      kSeries.setData(kdjData.k);
+      dSeries.setData(kdjData.d);
+      jSeries.setData(kdjData.j);
+      subSeriesRef.current.push(kSeries, dSeries, jSeries);
+    }
+    if (subchart === "ratio") {
+      const histogram = chart.addHistogramSeries({ lastValueVisible: false, priceLineVisible: false });
+      const line = chart.addLineSeries({ color: "#f0c04f", lineWidth: 2, priceLineVisible: false });
+      histogram.setData(volumeRatioData.bars);
+      line.setData(volumeRatioData.line);
+      subSeriesRef.current.push(histogram, line);
+    }
+    if (subchart === "rsi") {
+      const line = chart.addLineSeries({ color: "#4ea4ff", lineWidth: 2, priceLineVisible: false });
+      line.setData(rsiData.line);
+      subSeriesRef.current.push(line);
+    }
+    if (subchart === "wr") {
+      const line = chart.addLineSeries({ color: "#d879ff", lineWidth: 2, priceLineVisible: false });
+      line.setData(wrData.line);
+      subSeriesRef.current.push(line);
+    }
+    if (subchart === "psy") {
+      const line = chart.addLineSeries({ color: "#f0c04f", lineWidth: 2, priceLineVisible: false });
+      line.setData(psyData.line);
+      subSeriesRef.current.push(line);
+    }
+    if (subchart === "dmi") {
+      const pdi = chart.addLineSeries({ color: "#d94b42", lineWidth: 2, priceLineVisible: false });
+      const mdi = chart.addLineSeries({ color: "#14a06f", lineWidth: 2, priceLineVisible: false });
+      const adx = chart.addLineSeries({ color: "#f0c04f", lineWidth: 2, priceLineVisible: false });
+      pdi.setData(dmiData.pdi);
+      mdi.setData(dmiData.mdi);
+      adx.setData(dmiData.adx);
+      subSeriesRef.current.push(pdi, mdi, adx);
+    }
+    chart.timeScale().fitContent();
+  }, [chartData.length, dmiData, kdjData, macdData, psyData, rsiData, subchart, volumeData, volumeRatioData, wrData]);
+
   return (
     <div className="pro-chart" data-mode={mode}>
       <div className="chart-tooltip" ref={tooltipRef}>
@@ -1054,74 +1281,7 @@ function KLineChart({ bars, mode = "normal" }: { bars: PriceBar[]; mode?: "norma
       <div
         className="chart-main-canvas"
         data-mode={mode}
-        ref={(container) => {
-          if (!container || chartData.length === 0) return;
-          container.replaceChildren();
-          const priceScaleWidth = container.clientWidth < 560 ? 52 : 64;
-          const chart: IChartApi = createChart(container, {
-            layout: { background: { type: ColorType.Solid, color: "#0f1724" }, textColor: "#9aa8bd" },
-            grid: { vertLines: { color: "#1c2940" }, horzLines: { color: "#1c2940" } },
-            rightPriceScale: { borderColor: "#253145", minimumWidth: priceScaleWidth, scaleMargins: { top: 0.06, bottom: 0.08 } },
-            timeScale: { borderColor: "#253145", timeVisible: true, secondsVisible: false },
-            crosshair: { mode: 1, vertLine: { color: "#50647f", style: LineStyle.Dashed }, horzLine: { color: "#50647f", style: LineStyle.Dashed } },
-            width: container.clientWidth,
-            height: container.clientHeight,
-          });
-          if (isMinuteChart) {
-            const lineSeries = chart.addLineSeries({ color: "#69a8ff", lineWidth: 2, priceScaleId: "right", priceFormat });
-            lineSeries.setData(lineData);
-            if (mainChart === "standard") {
-              const vwapSeries = chart.addLineSeries({ color: "#f0c04f", lineWidth: 1, priceScaleId: "right", priceFormat });
-              vwapSeries.setData(vwapData);
-            }
-          }
-          if (!isMinuteChart) {
-            const candleSeries = chart.addCandlestickSeries({
-              upColor: "#d94b42",
-              downColor: "#14a06f",
-              borderUpColor: "#d94b42",
-              borderDownColor: "#14a06f",
-              wickUpColor: "#d94b42",
-              wickDownColor: "#14a06f",
-              priceScaleId: "right",
-              priceFormat,
-            });
-            candleSeries.setData(chartData);
-            if (mainChart === "standard") {
-              const maColors: Record<number, string> = { 5: "#f4d35e", 10: "#8ecae6", 20: "#c084fc", 60: "#f59e0b" };
-              maData.forEach((ma) => {
-                const series = chart.addLineSeries({ color: maColors[ma.window], lineWidth: 1, priceFormat, priceLineVisible: false, lastValueVisible: false });
-                series.setData(ma.data);
-              });
-            }
-          }
-          if (mainChart === "boll" || mainChart === "bbiboll") {
-            const activeBand = mainChart === "boll" ? bollData : bbiBollData;
-            const upperSeries = chart.addLineSeries({ color: "#f0b84f", lineWidth: 1, lineStyle: LineStyle.Dashed, priceFormat, priceLineVisible: false, lastValueVisible: false });
-            const middleSeries = chart.addLineSeries({ color: "#8ecae6", lineWidth: 2, priceFormat, priceLineVisible: false, lastValueVisible: false });
-            const lowerSeries = chart.addLineSeries({ color: "#f0b84f", lineWidth: 1, lineStyle: LineStyle.Dashed, priceFormat, priceLineVisible: false, lastValueVisible: false });
-            upperSeries.setData(activeBand.upper);
-            middleSeries.setData(activeBand.middle);
-            lowerSeries.setData(activeBand.lower);
-          }
-          chart.subscribeCrosshairMove((param) => {
-            const tooltip = tooltipRef.current;
-            if (!tooltip || !param.time) return;
-            const point = chartData.find((item) => item.time === param.time);
-            if (!point) return;
-            const changePct = point.open ? (point.close / point.open - 1) * 100 : 0;
-            tooltip.innerHTML = [
-              `<strong>${formatChartDate(point.raw)}</strong>`,
-              `<span>开 ${point.open.toFixed(2)}</span>`,
-              `<span>高 ${point.high.toFixed(2)}</span>`,
-              `<span>低 ${point.low.toFixed(2)}</span>`,
-              `<span>收 ${point.close.toFixed(2)}</span>`,
-              `<span class="${changePct >= 0 ? "up" : "down"}">${changePct >= 0 ? "+" : ""}${changePct.toFixed(2)}%</span>`,
-              `<span>量 ${point.volume.toLocaleString("zh-CN", { maximumFractionDigits: 0 })}</span>`,
-            ].join("");
-          });
-          chart.timeScale().fitContent();
-        }}
+        ref={mainContainerRef}
       />
       <div className="subchart-tabs" role="tablist" aria-label="副图指标">
         {subchartTabs.map((item) => (
@@ -1139,74 +1299,7 @@ function KLineChart({ bars, mode = "normal" }: { bars: PriceBar[]; mode?: "norma
       <div
         className="chart-sub-canvas"
         data-mode={mode}
-        ref={(container) => {
-          if (!container || chartData.length === 0) return;
-          container.replaceChildren();
-          const subPriceScaleWidth = container.clientWidth < 560 ? 52 : 64;
-          const chart: IChartApi = createChart(container, {
-            layout: { background: { type: ColorType.Solid, color: "#101a2a" }, textColor: "#9aa8bd" },
-            grid: { vertLines: { color: "#1c2940" }, horzLines: { color: "#1c2940" } },
-            rightPriceScale: { borderColor: "#253145", minimumWidth: subPriceScaleWidth, scaleMargins: { top: 0.14, bottom: 0.12 } },
-            timeScale: { borderColor: "#253145", timeVisible: true, secondsVisible: false },
-            crosshair: { mode: 1, vertLine: { color: "#50647f", style: LineStyle.Dashed }, horzLine: { color: "#50647f", style: LineStyle.Dashed } },
-            width: container.clientWidth,
-            height: container.clientHeight,
-          });
-          if (subchart === "volume") {
-            const series = chart.addHistogramSeries({
-              priceFormat: { type: "volume" },
-              lastValueVisible: true,
-              priceLineVisible: false,
-            });
-            series.setData(volumeData);
-          }
-          if (subchart === "macd") {
-            const histogram = chart.addHistogramSeries({
-              lastValueVisible: false,
-              priceLineVisible: false,
-            });
-            histogram.setData(macdData.histogram);
-            const difSeries = chart.addLineSeries({ color: "#4ea4ff", lineWidth: 2, priceLineVisible: false });
-            const deaSeries = chart.addLineSeries({ color: "#f0b84f", lineWidth: 2, priceLineVisible: false });
-            difSeries.setData(macdData.dif);
-            deaSeries.setData(macdData.dea);
-          }
-          if (subchart === "kdj") {
-            const kSeries = chart.addLineSeries({ color: "#4ea4ff", lineWidth: 2, priceLineVisible: false });
-            const dSeries = chart.addLineSeries({ color: "#f0b84f", lineWidth: 2, priceLineVisible: false });
-            const jSeries = chart.addLineSeries({ color: "#d879ff", lineWidth: 2, priceLineVisible: false });
-            kSeries.setData(kdjData.k);
-            dSeries.setData(kdjData.d);
-            jSeries.setData(kdjData.j);
-          }
-          if (subchart === "ratio") {
-            const histogram = chart.addHistogramSeries({ lastValueVisible: false, priceLineVisible: false });
-            histogram.setData(volumeRatioData.bars);
-            const line = chart.addLineSeries({ color: "#f0c04f", lineWidth: 2, priceLineVisible: false });
-            line.setData(volumeRatioData.line);
-          }
-          if (subchart === "rsi") {
-            const line = chart.addLineSeries({ color: "#4ea4ff", lineWidth: 2, priceLineVisible: false });
-            line.setData(rsiData.line);
-          }
-          if (subchart === "wr") {
-            const line = chart.addLineSeries({ color: "#d879ff", lineWidth: 2, priceLineVisible: false });
-            line.setData(wrData.line);
-          }
-          if (subchart === "psy") {
-            const line = chart.addLineSeries({ color: "#f0c04f", lineWidth: 2, priceLineVisible: false });
-            line.setData(psyData.line);
-          }
-          if (subchart === "dmi") {
-            const pdi = chart.addLineSeries({ color: "#d94b42", lineWidth: 2, priceLineVisible: false });
-            const mdi = chart.addLineSeries({ color: "#14a06f", lineWidth: 2, priceLineVisible: false });
-            const adx = chart.addLineSeries({ color: "#f0c04f", lineWidth: 2, priceLineVisible: false });
-            pdi.setData(dmiData.pdi);
-            mdi.setData(dmiData.mdi);
-            adx.setData(dmiData.adx);
-          }
-          chart.timeScale().fitContent();
-        }}
+        ref={subContainerRef}
       />
       <div className="chart-legend">
         {mainChart === "boll" || mainChart === "bbiboll" ? (

@@ -99,6 +99,54 @@ def test_sell_position_reduces_quantity_and_adds_cash(monkeypatch, tmp_path) -> 
     assert summary.cash == 12200
 
 
+def test_trade_inputs_normalize_symbol_and_round_money(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("STOCK_TOOL_DB_PATH", str(tmp_path / "test.sqlite3"))
+    monkeypatch.setattr(portfolio_module, "market_data", sample_market_data)
+    service = PortfolioService()
+    service.set_cash(1000.005)
+
+    service.upsert_position(PositionCreate(symbol=" SZ300308 ", quantity=3, average_cost=10.005))
+    service.sell_position(PositionSell(symbol="300308.SZ", quantity=1, sell_price=11.115))
+
+    positions = {position.symbol: position for position in service.positions()}
+    trades = service.trade_records()
+
+    assert positions["300308"].quantity == 2
+    assert positions["300308"].average_cost == 10.01
+    assert service.summary().cash == 981.1
+    assert [trade.symbol for trade in trades] == ["300308", "300308"]
+    assert trades[0].price == 11.12
+    assert trades[0].amount == 11.12
+
+
+def test_sell_position_removes_last_shares(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("STOCK_TOOL_DB_PATH", str(tmp_path / "test.sqlite3"))
+    monkeypatch.setattr(portfolio_module, "market_data", sample_market_data)
+    service = PortfolioService()
+    service.set_cash(20000)
+    service.upsert_position(PositionCreate(symbol="300308", quantity=100, average_cost=150))
+
+    service.sell_position(PositionSell(symbol="300308", quantity=100, sell_price=160))
+
+    assert service.positions() == []
+    assert service.summary().cash == 21000
+
+
+def test_sell_position_rejects_when_quantity_is_too_large(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("STOCK_TOOL_DB_PATH", str(tmp_path / "test.sqlite3"))
+    monkeypatch.setattr(portfolio_module, "market_data", sample_market_data)
+    service = PortfolioService()
+    service.set_cash(20000)
+    service.upsert_position(PositionCreate(symbol="300308", quantity=100, average_cost=150))
+
+    try:
+        service.sell_position(PositionSell(symbol="300308", quantity=101, sell_price=160))
+    except ValueError as exc:
+        assert "卖出数量不能超过当前持仓" in str(exc)
+    else:
+        raise AssertionError("Expected oversell error")
+
+
 def test_trade_records_include_buy_and_sell(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("STOCK_TOOL_DB_PATH", str(tmp_path / "test.sqlite3"))
     monkeypatch.setattr(portfolio_module, "market_data", sample_market_data)

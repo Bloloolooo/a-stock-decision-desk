@@ -217,6 +217,7 @@ class PredictionService:
         return REPO_PATH.exists() and (REPO_PATH / "requirements.txt").exists()
 
     def _install_python_dependencies(self, python: str) -> None:
+        self._ensure_pip(python)
         self._run_install_command([python, "-m", "pip", "install", "--upgrade", "pip"], timeout=300, stage="升级 pip")
         self._run_install_command(
             [python, "-m", "pip", "install", "-r", str(REPO_PATH / "requirements.txt")],
@@ -276,6 +277,41 @@ class PredictionService:
             "请安装完整 Python 3.10/3.11/3.12；Windows 上可设置环境变量 KRONOS_PYTHON 指向 python.exe 后重试。"
             f"最近错误：{errors[-1] if errors else '没有可用 Python'}"
         )
+
+    def _ensure_pip(self, python: str) -> None:
+        if self._pip_ready(python):
+            return
+        try:
+            self._run_install_command(
+                [python, "-m", "ensurepip", "--upgrade"],
+                timeout=300,
+                stage="修复 pip",
+            )
+        except RuntimeError as exc:
+            raise RuntimeError(
+                "Kronos pip 修复失败：当前虚拟环境缺少 pip，且 ensurepip 无法自动补齐。"
+                "请在 Windows 上安装完整 Python 3.10/3.11/3.12，并勾选 pip；"
+                "也可以先执行 py -3.11 -m ensurepip --upgrade，或设置 KRONOS_PYTHON 指向完整 python.exe 后重试。"
+                f"原始错误：{exc}"
+            ) from exc
+        if not self._pip_ready(python):
+            raise RuntimeError(
+                "Kronos pip 修复失败：ensurepip 执行完成后仍无法运行 python -m pip。"
+                "建议删除 backend/.kronos_runtime/.venv 后重试，或改用完整 Python 3.10/3.11。"
+            )
+
+    def _pip_ready(self, python: str) -> bool:
+        try:
+            subprocess.run(
+                [python, "-m", "pip", "--version"],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            return True
+        except (FileNotFoundError, subprocess.SubprocessError):
+            return False
 
     def _python_version(self, command: list[str]) -> tuple[int, int, int]:
         check_command = [
@@ -358,6 +394,11 @@ class PredictionService:
             hints.append(f"磁盘空间可能不足，建议至少预留 {_format_bytes(MIN_RUNTIME_FREE_BYTES)}。")
         if "permission denied" in lowered or "access is denied" in lowered or "errno 13" in lowered:
             hints.append(f"目录权限可能不足，请确认 {RUNTIME_PATH} 可写，或把项目移动到有写入权限的位置。")
+        if "no module named pip" in lowered or "ensurepip" in lowered or stage in {"升级 pip", "修复 pip"}:
+            hints.append(
+                "当前 Python/虚拟环境缺少 pip。Windows 上请安装完整 Python 并勾选 pip，"
+                "或执行 py -3.11 -m ensurepip --upgrade 后重试。"
+            )
         if "resolutionimpossible" in lowered or "dependency conflict" in lowered or "conflicting dependencies" in lowered:
             hints.append("Kronos 依赖解析冲突，建议换 Python 3.10/3.11，或删除 .kronos_runtime 后重新安装。")
         if "huggingface" in lowered or "model" in lowered or "401" in lowered or "403" in lowered:

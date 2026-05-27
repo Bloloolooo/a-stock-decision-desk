@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlite3 import Row
+from sqlite3 import Connection, Row
 
 from app.db import get_connection, init_db
 from app.schemas import PortfolioSummary, Position, PositionCreate, PositionSell, TradeRecord
@@ -18,22 +18,24 @@ class PortfolioService:
                 VALUES (1, ?, datetime('now'))
                 ON CONFLICT(id) DO UPDATE SET cash = excluded.cash, updated_at = excluded.updated_at
                 """,
-                (cash,),
+                (_money(cash),),
             )
 
     def upsert_position(self, payload: PositionCreate) -> Position:
-        symbol = payload.symbol.strip()
+        symbol = _normalize_symbol(payload.symbol)
         normalized_payload = PositionCreate(
             **{
                 **payload.model_dump(),
                 "symbol": symbol,
                 "name": payload.name.strip() or market_data.name(symbol),
+                "average_cost": _money(payload.average_cost),
             }
         )
-        buy_amount = normalized_payload.quantity * normalized_payload.average_cost
+        buy_amount = _money(normalized_payload.quantity * normalized_payload.average_cost)
         with get_connection() as connection:
-            cash = self._cash()
-            if buy_amount > cash:
+            self._ensure_account(connection)
+            cash = self._cash(connection)
+            if buy_amount > cash + 0.005:
                 raise ValueError(f"可用现金不足，买入需 {buy_amount:.2f}，当前现金 {cash:.2f}")
             row = connection.execute(
                 "SELECT symbol, name, quantity, average_cost, note FROM positions WHERE symbol = ?",
@@ -43,7 +45,7 @@ class PortfolioService:
                 current_quantity = int(row["quantity"])
                 new_quantity = current_quantity + normalized_payload.quantity
                 cost_value = current_quantity * float(row["average_cost"]) + buy_amount
-                average_cost = cost_value / new_quantity if new_quantity else normalized_payload.average_cost
+                average_cost = _money(cost_value / new_quantity) if new_quantity else normalized_payload.average_cost
                 name = row["name"] or normalized_payload.name
                 note = normalized_payload.note or row["note"]
             else:
@@ -73,7 +75,7 @@ class PortfolioService:
             connection.execute(
                 """
                 UPDATE account
-                SET cash = cash - ?, updated_at = datetime('now')
+                SET cash = ROUND(cash - ?, 2), updated_at = datetime('now')
                 WHERE id = 1
                 """,
                 (buy_amount,),
@@ -103,8 +105,10 @@ class PortfolioService:
         )
 
     def sell_position(self, payload: PositionSell) -> None:
-        symbol = payload.symbol.strip()
+        symbol = _normalize_symbol(payload.symbol)
+        sell_price = _money(payload.sell_price)
         with get_connection() as connection:
+            self._ensure_account(connection)
             row = connection.execute(
                 "SELECT symbol, name, quantity, average_cost, note FROM positions WHERE symbol = ?",
                 (symbol,),
@@ -123,12 +127,12 @@ class PortfolioService:
                     "UPDATE positions SET quantity = ?, updated_at = datetime('now') WHERE symbol = ?",
                     (remaining_quantity, symbol),
                 )
-            amount = payload.quantity * payload.sell_price
+            amount = _money(payload.quantity * sell_price)
             connection.execute(
                 """
-                INSERT INTO account (id, cash, updated_at)
-                VALUES (1, ?, datetime('now'))
-                ON CONFLICT(id) DO UPDATE SET cash = cash + excluded.cash, updated_at = excluded.updated_at
+                UPDATE account
+                SET cash = ROUND(cash + ?, 2), updated_at = datetime('now')
+                WHERE id = 1
                 """,
                 (amount,),
             )
@@ -137,11 +141,11 @@ class PortfolioService:
                 INSERT INTO trade_records (symbol, name, side, quantity, price, amount, note, created_at)
                 VALUES (?, ?, 'sell', ?, ?, ?, ?, datetime('now'))
                 """,
-                (symbol, row["name"], payload.quantity, payload.sell_price, amount, payload.note),
+                (symbol, row["name"], payload.quantity, sell_price, amount, payload.note),
             )
 
     def update_position_name(self, symbol: str, name: str) -> Position:
-        normalized_symbol = symbol.strip()
+        normalized_symbol = _normalize_symbol(symbol)
         normalized_name = name.strip()
         if not normalized_name:
             raise ValueError("名称不能为空")
@@ -212,10 +216,21 @@ class PortfolioService:
             updated_at=datetime.now(),
         )
 
-    def _cash(self) -> float:
+    def _cash(self, connection: Connection | None = None) -> float:
+        if connection is not None:
+            row = connection.execute("SELECT cash FROM account WHERE id = 1").fetchone()
+            return float(row["cash"]) if row else 0.0
         with get_connection() as connection:
             row = connection.execute("SELECT cash FROM account WHERE id = 1").fetchone()
         return float(row["cash"]) if row else 0.0
+
+    def _ensure_account(self, connection: Connection) -> None:
+        connection.execute(
+            """
+            INSERT OR IGNORE INTO account (id, cash, updated_at)
+            VALUES (1, 0.0, datetime('now'))
+            """
+        )
 
     def _position_from_row(self, row: Row) -> PositionCreate:
         return PositionCreate(
@@ -243,3 +258,14 @@ class PortfolioService:
 
 
 portfolio_service = PortfolioService()
+
+
+def _normalize_symbol(symbol: str) -> str:
+    normalized = "".join(character for character in symbol.strip() if character.isdigit())
+    if len(normalized) != 6:
+        raise ValueError("请输入 6 位股票代码")
+    return normalized
+
+
+def _money(value: float) -> float:
+    return round(float(value) + 1e-9, 2)

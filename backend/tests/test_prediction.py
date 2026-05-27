@@ -237,3 +237,46 @@ def test_prediction_dependency_conflict_has_version_hint(monkeypatch, tmp_path) 
 
     assert "依赖解析冲突" in message
     assert "Python 3.10/3.11" in message
+
+
+def test_prediction_repairs_missing_pip_with_ensurepip(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("STOCK_TOOL_DB_PATH", str(tmp_path / "test.sqlite3"))
+    calls: list[list[str]] = []
+    pip_checks = {"count": 0}
+
+    def fake_run(command, **kwargs):
+        calls.append(command)
+        if command[:3] == ["python", "-m", "pip"] and command[3:] == ["--version"]:
+            pip_checks["count"] += 1
+            if pip_checks["count"] == 1:
+                raise subprocess.CalledProcessError(1, command, stderr="No module named pip")
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(prediction_module.subprocess, "run", fake_run)
+    service = PredictionService()
+
+    service._install_python_dependencies("python")
+
+    assert ["python", "-m", "ensurepip", "--upgrade"] in calls
+    assert ["python", "-m", "pip", "install", "--upgrade", "pip"] in calls
+
+
+def test_prediction_missing_pip_reports_windows_repair_hint(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("STOCK_TOOL_DB_PATH", str(tmp_path / "test.sqlite3"))
+
+    def fake_run(command, **kwargs):
+        raise subprocess.CalledProcessError(1, command, stderr="No module named pip")
+
+    monkeypatch.setattr(prediction_module.subprocess, "run", fake_run)
+    service = PredictionService()
+
+    try:
+        service._install_python_dependencies("python")
+    except RuntimeError as exc:
+        message = str(exc)
+    else:
+        raise AssertionError("Expected missing pip failure")
+
+    assert "缺少 pip" in message
+    assert "ensurepip" in message
+    assert "完整 Python" in message
