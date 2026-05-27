@@ -428,8 +428,11 @@ class PredictionService:
     def _install_failure_hint(self, stage: str, detail: str, returncode: int) -> str:
         hints: list[str] = []
         lowered = detail.lower()
-        if os.name == "nt" and returncode in {3221225786, -1073741510}:
-            hints.append("Windows 返回码 3221225786 通常表示 Python 进程被中断、被安全软件拦截或解释器启动异常。")
+        if returncode in {3221225786, -1073741510} or "keyboardinterrupt" in lowered:
+            hints.append(
+                "Windows 返回码 3221225786/KeyboardInterrupt 通常表示 Python 进程被中断、"
+                "被安全软件拦截，或卡在系统信息 WMI 查询；可重试一次，必要时关闭拦截软件或改用 Python 3.11。"
+            )
         if _is_network_error(detail) or stage in {"下载 Kronos 源码", "安装 Kronos 依赖", "下载 HuggingFace 模型"}:
             hints.append(
                 "请检查网络、DNS、代理、防火墙或安全软件；需要代理时可设置 HTTPS_PROXY/HTTP_PROXY 后重试。"
@@ -445,7 +448,7 @@ class PredictionService:
             )
         if "resolutionimpossible" in lowered or "dependency conflict" in lowered or "conflicting dependencies" in lowered:
             hints.append("Kronos 依赖解析冲突，建议换 Python 3.10/3.11，或删除 .kronos_runtime 后重新安装。")
-        if "huggingface" in lowered or "model" in lowered or "401" in lowered or "403" in lowered:
+        if "huggingface" in lowered or "snapshot_download" in lowered or "401" in lowered or "403" in lowered:
             hints.append("HuggingFace 模型访问失败，请确认网络可访问 huggingface.co，必要时配置 HF_TOKEN 或镜像/代理。")
         return f"；建议：{'；'.join(dict.fromkeys(hints))}" if hints else ""
 
@@ -469,6 +472,9 @@ class PredictionService:
             raise RuntimeError("虚拟环境 pip 不可用。请先执行安装命令中的 ensurepip 和 pip upgrade。")
         script = (
             "import sys\n"
+            "import platform\n"
+            "if sys.platform == 'win32':\n"
+            "    platform.win32_ver = lambda *args, **kwargs: ('', '', '', '')\n"
             "from huggingface_hub import snapshot_download\n"
             f"sys.path.insert(0, {str(REPO_PATH)!r})\n"
             "import pandas\n"
@@ -558,8 +564,12 @@ class PredictionService:
             dedent(
                 f"""
                 import json
+                import platform
                 import sys
                 from pathlib import Path
+
+                if sys.platform == "win32":
+                    platform.win32_ver = lambda *args, **kwargs: ("", "", "", "")
 
                 import pandas as pd
 

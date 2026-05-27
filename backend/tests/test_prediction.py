@@ -274,6 +274,21 @@ def test_prediction_model_download_failure_has_proxy_hint(monkeypatch, tmp_path)
     assert "HTTPS_PROXY" in message
 
 
+def test_prediction_keyboard_interrupt_is_not_reported_as_huggingface(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("STOCK_TOOL_DB_PATH", str(tmp_path / "test.sqlite3"))
+    service = PredictionService()
+
+    hint = service._install_failure_hint(
+        "运行 Kronos 模型",
+        "release, version, csd, ptype = win32_ver() KeyboardInterrupt",
+        3221225786,
+    )
+
+    assert "KeyboardInterrupt" in hint
+    assert "WMI" in hint
+    assert "HuggingFace" not in hint
+
+
 def test_prediction_dependency_conflict_has_version_hint(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("STOCK_TOOL_DB_PATH", str(tmp_path / "test.sqlite3"))
 

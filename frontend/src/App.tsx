@@ -294,7 +294,7 @@ export default function App() {
     <div className="app-shell">
       <header className="topbar">
         <div>
-          <h1>A 股决策台</h1>
+          <h1>决策台</h1>
           <p>本地 Web 工具 · 手动持仓 · 规则因子 · 风控建议</p>
         </div>
         <nav className="tabs">
