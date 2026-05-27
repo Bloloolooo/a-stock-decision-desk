@@ -2,6 +2,7 @@ from datetime import date, datetime
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import threading
@@ -18,6 +19,10 @@ VENV_PATH = RUNTIME_PATH / ".venv"
 RUNNER_PATH = RUNTIME_PATH / "predict_once.py"
 DEFAULT_MODEL = "NeoQuasar/Kronos-small"
 DEFAULT_TOKENIZER = "NeoQuasar/Kronos-Tokenizer-base"
+
+
+def _command_text(command: list[str]) -> str:
+    return " ".join(command)
 
 
 class PredictionService:
@@ -121,17 +126,82 @@ class PredictionService:
                     text=True,
                     timeout=600,
                 )
-            if not VENV_PATH.exists():
-                subprocess.run([sys.executable, "-m", "venv", str(VENV_PATH)], check=True, timeout=300)
+            self._ensure_venv()
             python = self._venv_python()
-            subprocess.run([python, "-m", "pip", "install", "--upgrade", "pip"], check=True, timeout=300)
-            subprocess.run([python, "-m", "pip", "install", "-r", str(REPO_PATH / "requirements.txt")], check=True, timeout=1200)
+            self._run_install_command([python, "-m", "pip", "install", "--upgrade", "pip"], timeout=300)
+            self._run_install_command(
+                [python, "-m", "pip", "install", "-r", str(REPO_PATH / "requirements.txt")],
+                timeout=1200,
+            )
             self._write_runner()
             self._set_install_status("ready", None)
         except Exception as exc:
             self._set_install_status("failed", str(exc)[-500:])
         finally:
             self._install_lock.release()
+
+    def _ensure_venv(self) -> None:
+        python_path = self._venv_python_path()
+        if VENV_PATH.exists() and python_path.exists():
+            return
+        if VENV_PATH.exists() and not python_path.exists():
+            shutil.rmtree(VENV_PATH, ignore_errors=True)
+        errors: list[str] = []
+        for command in self._python_candidates():
+            create_command = [
+                *command,
+                "-m",
+                "venv",
+                *(["--copies"] if os.name == "nt" else []),
+                str(VENV_PATH),
+            ]
+            try:
+                self._run_install_command(create_command, timeout=300)
+                if python_path.exists():
+                    return
+                errors.append(f"{_command_text(create_command)} 执行完成但未生成 {python_path}")
+            except Exception as exc:
+                shutil.rmtree(VENV_PATH, ignore_errors=True)
+                errors.append(str(exc))
+        raise RuntimeError(
+            "Kronos Python 虚拟环境创建失败。"
+            "Windows 上可先安装完整 Python 3.10/3.11/3.12，并设置环境变量 KRONOS_PYTHON 指向 python.exe 后重试。"
+            f"最近错误：{errors[-1] if errors else '没有可用 Python'}"
+        )
+
+    def _python_candidates(self) -> list[list[str]]:
+        candidates: list[list[str]] = []
+        configured = os.getenv("KRONOS_PYTHON", "").strip()
+        if configured:
+            candidates.append([configured])
+        candidates.append([sys.executable])
+        if os.name == "nt":
+            candidates.extend([["py", "-3.11"], ["py", "-3.10"], ["py", "-3.12"], ["python"]])
+        else:
+            candidates.extend([["python3.11"], ["python3.10"], ["python3"]])
+        unique: list[list[str]] = []
+        seen: set[str] = set()
+        for command in candidates:
+            key = "\0".join(command)
+            if key not in seen:
+                seen.add(key)
+                unique.append(command)
+        return unique
+
+    def _run_install_command(self, command: list[str], timeout: int) -> subprocess.CompletedProcess[str]:
+        try:
+            return subprocess.run(command, check=True, capture_output=True, text=True, timeout=timeout)
+        except FileNotFoundError as exc:
+            raise RuntimeError(f"命令不存在：{_command_text(command)}") from exc
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError(f"命令超时：{_command_text(command)}") from exc
+        except subprocess.CalledProcessError as exc:
+            stdout = (exc.stdout or "").strip()
+            stderr = (exc.stderr or "").strip()
+            detail = stderr or stdout or "无输出"
+            if os.name == "nt" and exc.returncode in {3221225786, -1073741510}:
+                detail = f"{detail}；Windows 返回码 3221225786 通常表示 Python 进程被中断、被安全软件拦截或解释器启动异常。"
+            raise RuntimeError(f"命令失败：{_command_text(command)}；返回码 {exc.returncode}；{detail[-800:]}") from exc
 
     def _run_kronos(self, symbol: str, history: list[PriceBar], horizon: int) -> list[PriceBar]:
         self._write_runner()
