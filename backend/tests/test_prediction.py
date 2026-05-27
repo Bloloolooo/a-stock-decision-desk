@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 import app.services.prediction as prediction_module
 from app.services.prediction import PredictionService
+from app.services.market_data import sample_market_data
 
 
 def test_prediction_defaults_disabled(monkeypatch, tmp_path) -> None:
@@ -62,6 +63,30 @@ def test_prediction_check_environment_ready_even_when_disabled(monkeypatch, tmp_
     assert status.enabled is False
     assert status.install_status == "ready"
     assert status.ready is True
+
+
+def test_prediction_runtime_error_is_saved_for_ui(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("STOCK_TOOL_DB_PATH", str(tmp_path / "test.sqlite3"))
+    monkeypatch.setattr(prediction_module, "market_data", sample_market_data)
+    monkeypatch.setattr(PredictionService, "_runtime_ready", lambda self: True)
+
+    def fake_run_kronos(self, symbol, history, horizon):
+        raise RuntimeError("Kronos 预测失败：No module named torch")
+
+    monkeypatch.setattr(PredictionService, "_run_kronos", fake_run_kronos)
+    service = PredictionService()
+    service.update_settings(enabled=True, model_name="NeoQuasar/Kronos-small")
+    service._set_install_status("ready", None)
+
+    try:
+        service.predict("300308", horizon=5)
+    except RuntimeError as exc:
+        assert "No module named torch" in str(exc)
+    else:
+        raise AssertionError("Expected runtime prediction failure")
+
+    assert service.status().ready is True
+    assert "No module named torch" in (service.status().last_error or "")
 
 
 def test_prediction_venv_failure_reports_actionable_error(monkeypatch, tmp_path) -> None:

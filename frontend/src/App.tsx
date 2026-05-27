@@ -226,7 +226,7 @@ export default function App() {
         setPrediction(result);
         setStatus("预测已更新");
       })
-      .catch(() => setStatus("预测尚未就绪"));
+      .catch((error: Error) => setStatus(error.message || "预测生成失败"));
   };
 
   const runBacktest = (payload: BacktestRequest) => {

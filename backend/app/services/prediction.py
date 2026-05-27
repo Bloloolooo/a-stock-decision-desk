@@ -174,7 +174,11 @@ class PredictionService:
         if not status.ready:
             raise RuntimeError("Kronos 运行环境尚未就绪")
         history = market_data.bars(symbol=symbol, period="daily")[-120:]
-        forecast = self._run_kronos(symbol=symbol, history=history, horizon=max(1, min(horizon, 60)))
+        try:
+            forecast = self._run_kronos(symbol=symbol, history=history, horizon=max(1, min(horizon, 60)))
+        except RuntimeError as exc:
+            self._set_install_status("ready", str(exc)[-500:])
+            raise
         start_close = history[-1].close
         end_close = forecast[-1].close if forecast else start_close
         expected_change = (end_close / start_close - 1) * 100 if start_close else 0.0
