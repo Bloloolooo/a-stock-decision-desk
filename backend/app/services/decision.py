@@ -3,6 +3,8 @@ from datetime import datetime
 from app.schemas import ChipAnalysis, ChipLevel, DecisionAdvice, DecisionCenter, IndicatorPoint, IndicatorScore, IntradayGame, PriceBar
 from app.services.market_data import market_data
 
+DECISION_CACHE_TTL_SECONDS = 60
+
 
 def _ma(values: list[float], window: int) -> float:
     if not values:
@@ -210,7 +212,13 @@ def _intraday_game(bars: list[PriceBar]) -> IntradayGame:
 
 
 class DecisionService:
+    def __init__(self) -> None:
+        self._cache: dict[str, tuple[datetime, DecisionCenter]] = {}
+
     def decision(self, symbol: str) -> DecisionCenter:
+        cached = self._cache.get(symbol)
+        if cached and (datetime.now() - cached[0]).total_seconds() < DECISION_CACHE_TTL_SECONDS:
+            return cached[1]
         daily = market_data.bars(symbol=symbol, period="daily")
         intraday = market_data.bars(symbol=symbol, period="intraday")
         usable = daily[-120:] if len(daily) >= 30 else daily
@@ -266,7 +274,7 @@ class DecisionService:
         )
         advice = self._advice(matrix, volume_status, game, chip_analysis, last.close, support, resistance)
 
-        return DecisionCenter(
+        result = DecisionCenter(
             symbol=symbol,
             name=market_data.name(symbol),
             current_price=round(last.close, 2),
@@ -295,6 +303,8 @@ class DecisionService:
             advice=advice,
             updated_at=datetime.now(),
         )
+        self._cache[symbol] = (datetime.now(), result)
+        return result
 
     def _trend_status(self, close: float, ma5: float, ma20: float, ma60: float) -> str:
         if close > ma5 > ma20 > ma60:

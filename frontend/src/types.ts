@@ -293,3 +293,13 @@ export type DecisionCenter = {
   };
   updated_at: string;
 };
+
+export type DashboardData = {
+  symbol: string;
+  period: string;
+  bars: PriceBar[];
+  risk: RiskAdvice;
+  decision: DecisionCenter;
+  market_status: MarketStatus;
+  updated_at: string;
+};

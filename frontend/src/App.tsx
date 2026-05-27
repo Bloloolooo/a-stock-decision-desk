@@ -92,19 +92,13 @@ export default function App() {
 
   const reloadMarket = () => {
     setStatus("刷新行情中");
-    return api.bars(selectedSymbol, period)
-      .then((barData) => {
-        setBars(barData);
-        return Promise.all([api.risk(selectedSymbol), api.decision(selectedSymbol), api.marketStatus()]);
-      })
-      .then((result) => {
-        const riskData = result[0] as RiskAdvice;
-        const decisionData = result[1] as DecisionCenter;
-        const marketStatusData = result[2] as MarketStatus;
-        setRisk(riskData);
-        setDecision(decisionData);
-        setMarketStatus(marketStatusData);
-        setStatus(`${marketStatusData.description}已更新`);
+    return api.dashboard(selectedSymbol, period)
+      .then((dashboard) => {
+        setBars(dashboard.bars);
+        setRisk(dashboard.risk);
+        setDecision(dashboard.decision);
+        setMarketStatus(dashboard.market_status);
+        setStatus(`${dashboard.market_status.description}已更新`);
       })
       .catch(() => setStatus("行情刷新失败"));
   };
@@ -202,20 +196,20 @@ export default function App() {
   };
 
   useEffect(() => {
-    Promise.all([api.summary(), api.positions(), api.trades(), api.screenerConfig(), api.screenerStatus(), api.predictionStatus(), api.marketStatus(), api.marketSettings(), api.marketPeriods()])
-      .then(([summaryData, positionData, tradeData, configData, statusData, predictionStatusData, marketStatusData, marketSettingsData, periodData]) => {
+    Promise.all([api.summary(), api.positions(), api.marketPeriods()])
+      .then(([summaryData, positionData, periodData]) => {
         setSummary(summaryData);
         setPositions(positionData);
-        setTrades(tradeData);
-        setScreenerConfig(configData);
-        setScreenerStatus(statusData);
-        setPredictionStatus(predictionStatusData);
-        setMarketStatus(marketStatusData);
-        setMarketSettings(marketSettingsData);
         setPeriods(periodData);
-        setStatus(`${marketStatusData.description}已更新`);
+        setStatus("基础数据已加载");
       })
       .catch(() => setStatus("后端未连接，等待数据"));
+    api.trades().then(setTrades).catch(() => undefined);
+    api.screenerConfig().then(setScreenerConfig).catch(() => undefined);
+    api.screenerStatus().then(setScreenerStatus).catch(() => undefined);
+    api.predictionStatus().then(setPredictionStatus).catch(() => undefined);
+    api.marketStatus().then(setMarketStatus).catch(() => undefined);
+    api.marketSettings().then(setMarketSettings).catch(() => undefined);
     reloadScreener().catch(() => undefined);
     const predictionTimer = window.setInterval(() => {
       reloadPredictionStatus().catch(() => undefined);
@@ -237,7 +231,10 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    reloadMarket();
+    const timer = window.setTimeout(() => {
+      reloadMarket();
+    }, 300);
+    return () => window.clearTimeout(timer);
   }, [selectedSymbol, period]);
 
   useEffect(() => {

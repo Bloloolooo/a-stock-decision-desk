@@ -328,3 +328,13 @@ class DecisionCenter(BaseModel):
     indicator_matrix: list[IndicatorScore]
     advice: DecisionAdvice
     updated_at: datetime
+
+
+class DashboardData(BaseModel):
+    symbol: str
+    period: str
+    bars: list[PriceBar]
+    risk: RiskAdvice
+    decision: DecisionCenter
+    market_status: MarketStatus
+    updated_at: datetime

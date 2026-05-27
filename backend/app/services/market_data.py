@@ -11,6 +11,8 @@ from urllib.request import Request, urlopen
 from app.db import get_connection, init_db
 from app.schemas import MarketPeriod, MarketSettings, MarketStatus, PriceBar, StockInfo
 
+CACHE_TTL_SECONDS = 300
+
 
 def _price(value: object) -> float:
     return round(float(value), 2)
@@ -189,7 +191,7 @@ class AkShareMarketDataProvider:
     def bars(self, symbol: str, period: str = "daily", adjust: str = "qfq") -> list[PriceBar]:
         cache_key = (symbol, period, adjust)
         cached = self._bars_cache.get(cache_key)
-        if cached and (datetime.now() - cached[0]).total_seconds() < 60:
+        if cached and (datetime.now() - cached[0]).total_seconds() < CACHE_TTL_SECONDS:
             self.last_source = "akshare"
             self.last_error = None
             return cached[1]
@@ -407,7 +409,7 @@ class SinaMarketDataProvider(AkShareMarketDataProvider):
     def bars(self, symbol: str, period: str = "daily", adjust: str = "qfq") -> list[PriceBar]:
         cache_key = (symbol, period, adjust)
         cached = self._bars_cache.get(cache_key)
-        if cached and (datetime.now() - cached[0]).total_seconds() < 60:
+        if cached and (datetime.now() - cached[0]).total_seconds() < CACHE_TTL_SECONDS:
             self.last_source = "sina"
             self.last_error = None
             return cached[1]
@@ -441,7 +443,7 @@ class TushareMarketDataProvider(AkShareMarketDataProvider):
             return super().bars(symbol=symbol, period=period, adjust=adjust)
         cache_key = (symbol, period, adjust)
         cached = self._bars_cache.get(cache_key)
-        if cached and (datetime.now() - cached[0]).total_seconds() < 60:
+        if cached and (datetime.now() - cached[0]).total_seconds() < CACHE_TTL_SECONDS:
             self.last_source = "tushare"
             self.last_error = None
             return cached[1]
@@ -541,7 +543,7 @@ class EfinanceMarketDataProvider(AkShareMarketDataProvider):
             return super().bars(symbol=symbol, period=period, adjust=adjust)
         cache_key = (symbol, period, adjust)
         cached = self._bars_cache.get(cache_key)
-        if cached and (datetime.now() - cached[0]).total_seconds() < 60:
+        if cached and (datetime.now() - cached[0]).total_seconds() < CACHE_TTL_SECONDS:
             self.last_source = "efinance"
             self.last_error = None
             return cached[1]
@@ -600,7 +602,7 @@ class BaoStockMarketDataProvider(AkShareMarketDataProvider):
             return super().bars(symbol=symbol, period=period, adjust=adjust)
         cache_key = (symbol, period, adjust)
         cached = self._bars_cache.get(cache_key)
-        if cached and (datetime.now() - cached[0]).total_seconds() < 60:
+        if cached and (datetime.now() - cached[0]).total_seconds() < CACHE_TTL_SECONDS:
             self.last_source = "baostock"
             self.last_error = None
             return cached[1]
@@ -680,7 +682,7 @@ class TencentMarketDataProvider(AkShareMarketDataProvider):
             return self._fetch_sina_or_sample(symbol=symbol, period=period, adjust=adjust)
         cache_key = (symbol, period, adjust)
         cached = self._bars_cache.get(cache_key)
-        if cached and (datetime.now() - cached[0]).total_seconds() < 60:
+        if cached and (datetime.now() - cached[0]).total_seconds() < CACHE_TTL_SECONDS:
             self.last_source = "tencent"
             self.last_error = None
             return cached[1]

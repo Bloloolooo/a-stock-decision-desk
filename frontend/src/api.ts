@@ -1,4 +1,4 @@
-import type { BacktestRequest, BacktestResult, DecisionCenter, MarketPeriod, MarketSettings, MarketStatus, PortfolioSummary, Position, PositionInput, PredictionResult, PredictionStatus, PriceBar, RiskAdvice, ScreenerConfig, ScreenerResult, ScreenerStatus, SellInput, TradeRecord } from "./types";
+import type { BacktestRequest, BacktestResult, DashboardData, DecisionCenter, MarketPeriod, MarketSettings, MarketStatus, PortfolioSummary, Position, PositionInput, PredictionResult, PredictionStatus, PriceBar, RiskAdvice, ScreenerConfig, ScreenerResult, ScreenerStatus, SellInput, TradeRecord } from "./types";
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? "http://localhost:8000/api";
 
@@ -69,6 +69,7 @@ export const api = {
   updateMarketSettings: (provider: string, tushare_token: string) => putJson<MarketSettings>("/market/settings", { provider, tushare_token }),
   marketPeriods: () => getJson<MarketPeriod[]>("/market/periods"),
   bars: (symbol: string, period: string) => getJson<PriceBar[]>(`/market/bars/${symbol}?period=${period}`),
+  dashboard: (symbol: string, period: string) => getJson<DashboardData>(`/market/dashboard/${symbol}?period=${period}`),
   decision: (symbol: string) => getJson<DecisionCenter>(`/decision/${symbol}`),
   risk: (symbol: string) => getJson<RiskAdvice>(`/risk/advice/${symbol}`),
   screener: (type: "trend" | "rebound") => getJson<ScreenerResult[]>(`/screener/results?type=${type}`),
