@@ -287,9 +287,6 @@ export default function App() {
   useEffect(() => {
     const symbol = selectedSymbol;
     const targetPeriod = period;
-    setBars([]);
-    setRisk(null);
-    setDecision(null);
     const timer = window.setTimeout(() => {
       reloadMarket(symbol, targetPeriod);
     }, 300);
@@ -519,7 +516,7 @@ function HomePage(props: {
     }
   };
 
-  const sellPosition = async () => {
+  const submitSellPosition = async () => {
     if (tradeSubmitting) return;
     try {
       setTradeSubmitting("sell");
@@ -703,7 +700,7 @@ function HomePage(props: {
               <button type="button" onClick={fillSellPrice} disabled={!quotePrice}>填当前价</button>
               <span>可卖 {sellablePosition?.quantity ?? 0} 股</span>
             </div>
-            <button onClick={sellPosition} disabled={Boolean(tradeSubmitting) || !sellForm.symbol || !sellForm.quantity || !sellForm.sell_price}>
+            <button onClick={submitSellPosition} disabled={Boolean(tradeSubmitting) || !sellForm.symbol || !sellForm.quantity || !sellForm.sell_price}>
               {tradeSubmitting === "sell" ? "卖出处理中" : "记录卖出"}
             </button>
           </div>
