@@ -458,14 +458,19 @@ function HomePage(props: {
   }, [fullscreen]);
 
   const saveCash = async () => {
-    const cash = parseNumberInput(cashValue);
-    if (!Number.isFinite(cash) || cash < 0) {
-      setFormStatus("现金格式有误，请输入大于等于 0 的数字。");
-      return;
+    try {
+      const cash = parseNumberInput(cashValue);
+      if (!Number.isFinite(cash) || cash < 0) {
+        setFormStatus("现金格式有误，请输入大于等于 0 的数字。");
+        return;
+      }
+      await api.updateCash(Number(cash.toFixed(2)));
+      await props.onPortfolioChange();
+      await props.onRefreshMarket();
+      setFormStatus("现金已更新，风控建议已同步");
+    } catch (error) {
+      setFormStatus(error instanceof Error ? error.message : "现金保存失败，请检查后端连接。");
     }
-    await api.updateCash(Number(cash.toFixed(2)));
-    await props.onPortfolioChange();
-    setFormStatus("现金已更新");
   };
 
   const savePosition = async () => {
@@ -479,16 +484,16 @@ function HomePage(props: {
         setFormStatus("买入信息有误，请输入 6 位代码、正整数数量和大于 0 的买入均价。");
         return;
       }
-      const refreshCurrentSymbol = symbol === props.selectedSymbol;
       await api.upsertPosition({
         symbol,
         quantity,
         average_cost: averageCost,
       });
       await props.onPortfolioChange();
-      props.onSelectSymbol(symbol);
-      if (refreshCurrentSymbol) {
+      if (symbol === props.selectedSymbol) {
         await props.onRefreshMarket();
+      } else {
+        props.onSelectSymbol(symbol);
       }
       setPositionForm({ symbol: "", quantity: "", average_cost: "" });
       setFormStatus("买入已记录，现金和持仓已更新");
@@ -510,16 +515,13 @@ function HomePage(props: {
         setFormStatus("卖出信息有误，请输入 6 位代码、正整数数量和大于 0 的卖出价格。");
         return;
       }
-      const refreshCurrentSymbol = symbol === props.selectedSymbol;
       await api.sellPosition({
         symbol,
         quantity,
         sell_price: sellPrice,
       });
       await props.onPortfolioChange();
-      if (refreshCurrentSymbol) {
-        await props.onRefreshMarket();
-      }
+      await props.onRefreshMarket();
       setSellForm({ symbol: props.selectedSymbol, quantity: "", sell_price: "" });
       setFormStatus("卖出已记录");
     } catch (error) {
