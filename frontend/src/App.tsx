@@ -84,6 +84,7 @@ export default function App() {
   const [periods, setPeriods] = useState<MarketPeriod[]>(defaultPeriods);
   const [autoRefreshSeconds, setAutoRefreshSeconds] = useState(10);
   const [status, setStatus] = useState("加载中");
+  const marketRequestRef = useRef(0);
 
   const reloadPortfolio = () => {
     return Promise.all([api.summary(), api.positions(), api.watchlist()])
@@ -97,17 +98,23 @@ export default function App() {
       });
   };
 
-  const reloadMarket = () => {
-    setStatus("刷新行情中");
-    return api.dashboard(selectedSymbol, period)
+  const reloadMarket = (symbol = selectedSymbol, targetPeriod = period) => {
+    const requestId = marketRequestRef.current + 1;
+    marketRequestRef.current = requestId;
+    setStatus(`刷新 ${symbol} 行情中`);
+    return api.dashboard(symbol, targetPeriod)
       .then((dashboard) => {
+        if (requestId !== marketRequestRef.current) return;
         setBars(dashboard.bars);
         setRisk(dashboard.risk);
         setDecision(dashboard.decision);
         setMarketStatus(dashboard.market_status);
-        setStatus(`${dashboard.market_status.description}已更新`);
+        setStatus(`${dashboard.symbol} · ${dashboard.market_status.description}已更新`);
       })
-      .catch(() => setStatus("行情刷新失败"));
+      .catch(() => {
+        if (requestId !== marketRequestRef.current) return;
+        setStatus(`${symbol} 行情刷新失败`);
+      });
   };
 
   const reloadScreener = () => {
@@ -278,8 +285,13 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    const symbol = selectedSymbol;
+    const targetPeriod = period;
+    setBars([]);
+    setRisk(null);
+    setDecision(null);
     const timer = window.setTimeout(() => {
-      reloadMarket();
+      reloadMarket(symbol, targetPeriod);
     }, 300);
     return () => window.clearTimeout(timer);
   }, [selectedSymbol, period]);
