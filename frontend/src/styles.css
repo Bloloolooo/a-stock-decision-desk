@@ -100,6 +100,50 @@ button {
   grid-template-columns: repeat(6, minmax(0, 1fr));
 }
 
+.global-radar {
+  display: grid;
+  grid-template-columns: 1.6fr repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  align-items: stretch;
+  margin-bottom: 12px;
+  padding: 12px;
+}
+
+.global-radar > div:first-child {
+  display: grid;
+  align-content: center;
+  gap: 5px;
+}
+
+.global-radar span,
+.radar-signal span {
+  color: #667085;
+  font-size: 12px;
+}
+
+.global-radar strong,
+.radar-signal strong {
+  color: #142238;
+  font-size: 20px;
+}
+
+.global-radar p,
+.radar-signal small {
+  margin: 0;
+  color: #667085;
+  font-size: 12px;
+}
+
+.radar-signal {
+  display: grid;
+  align-content: center;
+  gap: 4px;
+  padding: 10px;
+  border: 1px solid #e0e8f1;
+  border-radius: 6px;
+  background: #f8fbfe;
+}
+
 .metric-card,
 .panel,
 .mini-stat {
@@ -635,6 +679,11 @@ td small {
   border-radius: 50%;
 }
 
+.trade-level-legend {
+  color: #dce7f5;
+  font-weight: 800;
+}
+
 .fullscreen-chart {
   position: fixed;
   inset: 0;
@@ -707,7 +756,7 @@ td small {
 
 .position-strip {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 8px;
   padding: 10px;
   border-top: 1px solid #e0e8f1;
@@ -1384,6 +1433,11 @@ td small {
     grid-template-columns: 1fr;
   }
 
+  .position-strip,
+  .global-radar {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
   .chart-actions,
   .periods,
   .refresh-controls {
@@ -1401,6 +1455,8 @@ td small {
   .advisor,
   .metrics-grid,
   .market-pulse,
+  .global-radar,
+  .position-strip,
   .review-summary,
   .backtest-controls,
   .backtest-metrics {

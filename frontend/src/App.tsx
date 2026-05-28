@@ -402,6 +402,16 @@ function HomePage(props: {
 }) {
   const selectedPosition = props.positions.find((position) => position.symbol === props.selectedSymbol);
   const symbolInputRef = useRef<HTMLInputElement>(null);
+  const tradeLevels = useMemo(() => {
+    const buyPrice = validPrice(props.decision?.support_price);
+    const sellPrice = validPrice(props.decision?.resistance_price);
+    const stopPrice = validPrice(props.risk?.stop_loss_price);
+    return [
+      buyPrice ? { key: "buy" as const, label: "建议买入", price: buyPrice, color: "#4ea4ff" } : null,
+      sellPrice ? { key: "sell" as const, label: "建议卖出", price: sellPrice, color: "#f0b84f" } : null,
+      stopPrice ? { key: "stop" as const, label: "止损参考", price: stopPrice, color: "#14a06f" } : null,
+    ].filter((item): item is TradeLevel => item !== null);
+  }, [props.decision?.resistance_price, props.decision?.support_price, props.risk?.stop_loss_price]);
   const [cashValue, setCashValue] = useState(moneyInput(props.summary.cash));
   const [positionForm, setPositionForm] = useState({
     symbol: "",
@@ -691,10 +701,12 @@ function HomePage(props: {
               </div>
             </div>
           </div>
-          <KLineChart bars={props.bars} />
+          <KLineChart bars={props.bars} tradeLevels={tradeLevels} />
           <div className="position-strip">
             <MiniStat label="买入成本" value={selectedPosition ? `${selectedPosition.average_cost.toFixed(2)} · ${selectedPosition.quantity} 股` : "无持仓"} />
             <MiniStat label="浮动盈亏" value={selectedPosition ? `${signed(selectedPosition.floating_pnl)} · ${pct(selectedPosition.floating_pnl_pct)}` : "--"} tone={selectedPosition && selectedPosition.floating_pnl >= 0 ? "up" : "down"} />
+            <MiniStat label="建议买入" value={tradeLevels.find((item) => item.key === "buy")?.price.toFixed(2) ?? "--"} />
+            <MiniStat label="建议卖出" value={tradeLevels.find((item) => item.key === "sell")?.price.toFixed(2) ?? "--"} />
             <MiniStat label="止损参考" value={props.risk ? `${props.risk.stop_loss_price.toFixed(2)} · 风险 ${yuan(props.risk.single_stock_risk)}` : "--"} />
             <MiniStat label="建议仓位" value={props.risk ? `${(props.risk.suggested_min_ratio * 100).toFixed(0)}-${(props.risk.suggested_max_ratio * 100).toFixed(0)}%` : "--"} />
           </div>
@@ -740,7 +752,7 @@ function HomePage(props: {
               ))}
             </div>
           </div>
-          <KLineChart bars={props.bars} mode="fullscreen" />
+          <KLineChart bars={props.bars} mode="fullscreen" tradeLevels={tradeLevels} />
         </div>
       )}
     </>
@@ -804,6 +816,11 @@ function formatChartDate(bar: PriceBar) {
 }
 
 const priceFormat = { type: "price" as const, precision: 2, minMove: 0.01 };
+
+function validPrice(value: number | null | undefined) {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return null;
+  return value;
+}
 
 function movingAverage(values: number[], window: number) {
   return values.map((_, index) => {
@@ -956,12 +973,18 @@ function chartDmi(bars: Array<{ high: number; low: number; close: number }>, win
 
 type MainChartType = "standard" | "boll" | "bbiboll";
 type SubChartType = "volume" | "macd" | "kdj" | "ratio" | "rsi" | "wr" | "psy" | "dmi";
+type TradeLevel = {
+  key: "buy" | "sell" | "stop";
+  label: string;
+  price: number;
+  color: string;
+};
 type ChartSeries =
   | ReturnType<IChartApi["addLineSeries"]>
   | ReturnType<IChartApi["addCandlestickSeries"]>
   | ReturnType<IChartApi["addHistogramSeries"]>;
 
-function KLineChart({ bars, mode = "normal" }: { bars: PriceBar[]; mode?: "normal" | "fullscreen" }) {
+function KLineChart({ bars, mode = "normal", tradeLevels = [] }: { bars: PriceBar[]; mode?: "normal" | "fullscreen"; tradeLevels?: TradeLevel[] }) {
   const [mainChart, setMainChart] = useState<MainChartType>("standard");
   const [subchart, setSubchart] = useState<SubChartType>("macd");
   const tooltipRef = useRef<HTMLDivElement | null>(null);
@@ -1146,6 +1169,10 @@ function KLineChart({ bars, mode = "normal" }: { bars: PriceBar[]; mode?: "norma
     { key: "psy", label: "PSY" },
     { key: "dmi", label: "DMI" },
   ];
+  const visibleTradeLevels = useMemo(
+    () => tradeLevels.filter((item) => Number.isFinite(item.price) && item.price > 0),
+    [tradeLevels],
+  );
 
   useEffect(() => {
     const container = mainContainerRef.current;
@@ -1217,10 +1244,12 @@ function KLineChart({ bars, mode = "normal" }: { bars: PriceBar[]; mode?: "norma
     mainSeriesRef.current.forEach((series) => chart.removeSeries(series));
     mainSeriesRef.current = [];
     if (chartData.length === 0) return undefined;
+    let primaryPriceSeries: ChartSeries | null = null;
     if (isMinuteChart) {
       const lineSeries = chart.addLineSeries({ color: "#69a8ff", lineWidth: 2, priceScaleId: "right", priceFormat });
       lineSeries.setData(lineData);
       mainSeriesRef.current.push(lineSeries);
+      primaryPriceSeries = lineSeries;
       if (mainChart === "standard") {
         const vwapSeries = chart.addLineSeries({ color: "#f0c04f", lineWidth: 1, priceScaleId: "right", priceFormat });
         vwapSeries.setData(vwapData);
@@ -1240,6 +1269,7 @@ function KLineChart({ bars, mode = "normal" }: { bars: PriceBar[]; mode?: "norma
       });
       candleSeries.setData(chartData);
       mainSeriesRef.current.push(candleSeries);
+      primaryPriceSeries = candleSeries;
       if (mainChart === "standard") {
         const maColors: Record<number, string> = { 5: "#f4d35e", 10: "#8ecae6", 20: "#c084fc", 60: "#f59e0b" };
         maData.forEach((ma) => {
@@ -1259,6 +1289,16 @@ function KLineChart({ bars, mode = "normal" }: { bars: PriceBar[]; mode?: "norma
       lowerSeries.setData(activeBand.lower);
       mainSeriesRef.current.push(upperSeries, middleSeries, lowerSeries);
     }
+    visibleTradeLevels.forEach((item) => {
+      primaryPriceSeries?.createPriceLine({
+        price: item.price,
+        color: item.color,
+        lineWidth: 1,
+        lineStyle: item.key === "stop" ? LineStyle.Dotted : LineStyle.Dashed,
+        axisLabelVisible: true,
+        title: item.label,
+      });
+    });
     const handleCrosshairMove = (param: MouseEventParams<Time>) => {
       const tooltip = tooltipRef.current;
       if (!tooltip || !param.time) return;
@@ -1278,7 +1318,7 @@ function KLineChart({ bars, mode = "normal" }: { bars: PriceBar[]; mode?: "norma
     chart.subscribeCrosshairMove(handleCrosshairMove);
     chart.timeScale().fitContent();
     return () => chart.unsubscribeCrosshairMove(handleCrosshairMove);
-  }, [bbiBollData, bollData, chartData, isMinuteChart, lineData, maData, mainChart, vwapData]);
+  }, [bbiBollData, bollData, chartData, isMinuteChart, lineData, maData, mainChart, visibleTradeLevels, vwapData]);
 
   useEffect(() => {
     const chart = subChartRef.current;
@@ -1439,6 +1479,11 @@ function KLineChart({ bars, mode = "normal" }: { bars: PriceBar[]; mode?: "norma
             <span><i style={{ background: "#f0c04f" }} />ADX</span>
           </>
         )}
+        {visibleTradeLevels.map((item) => (
+          <span key={item.key} className="trade-level-legend">
+            <i style={{ background: item.color }} />{item.label} {item.price.toFixed(2)}
+          </span>
+        ))}
       </div>
     </div>
   );
@@ -1548,6 +1593,15 @@ function ScreenerPage(props: {
   const cacheAge = props.status?.cache_age_seconds == null ? "--" : `${props.status.cache_age_seconds} 秒`;
   const progress = props.status?.total_count ? Math.round((props.status.processed_count / props.status.total_count) * 100) : 0;
   const isScanning = props.status?.scan_status === "running" || props.status?.scan_status === "queued";
+  const coverageRate = props.status?.total_count ? Math.round(((props.status.success_count ?? 0) / props.status.total_count) * 100) : 0;
+  const highBalanced = props.balanced.filter((row) => row.score >= 75).length;
+  const watchGrade = highBalanced >= 8 ? "机会密集" : highBalanced >= 3 ? "局部机会" : isScanning ? "扫描中" : "机会稀疏";
+  const radarSignals = [
+    { label: "覆盖率", value: props.status?.total_count ? `${coverageRate}%` : "--", detail: `${props.status?.success_count ?? 0}/${props.status?.total_count ?? 0}` },
+    { label: "综合高分", value: `${highBalanced} 只`, detail: "评分 >= 75" },
+    { label: "市场温度", value: props.status?.market_environment ?? "未知", detail: `${(props.status?.market_factor ?? 1).toFixed(2)}x` },
+    { label: "扫描用时", value: props.status?.last_duration_seconds ? `${props.status.last_duration_seconds.toFixed(1)}s` : "--", detail: props.status?.last_scan_at ? new Date(props.status.last_scan_at).toLocaleTimeString("zh-CN", { hour12: false }) : "未完成" },
+  ];
   const configuredSymbols = props.config?.symbols ?? [];
   const activeSymbols = configuredSymbols.length > 0 ? configuredSymbols : [];
   const isUsingDefaultPool = configuredSymbols.length === 0;
@@ -1616,6 +1670,20 @@ function ScreenerPage(props: {
           <Metric label="扫描成功" value={`${props.status?.success_count ?? 0} 只`} />
           <Metric label="生成时间" value={generatedAt} />
         </div>
+        <section className="panel global-radar">
+          <div>
+            <span>全局选股状态</span>
+            <strong>{watchGrade}</strong>
+            <p>雷达按沪深 A 股全市场扫描，观察池只作为重点跟踪，不会限制候选范围。</p>
+          </div>
+          {radarSignals.map((item) => (
+            <div className="radar-signal" key={item.label}>
+              <span>{item.label}</span>
+              <strong>{item.value}</strong>
+              <small>{item.detail}</small>
+            </div>
+          ))}
+        </section>
         {view === "lists" ? (
           <div className="lists-grid single-list">
             <div className="subtabs list-tabs">
