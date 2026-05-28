@@ -70,6 +70,7 @@ export default function App() {
   const [trades, setTrades] = useState<TradeRecord[]>([]);
   const [bars, setBars] = useState<PriceBar[]>([]);
   const [risk, setRisk] = useState<RiskAdvice | null>(null);
+  const [balanced, setBalanced] = useState<ScreenerResult[]>([]);
   const [trend, setTrend] = useState<ScreenerResult[]>([]);
   const [rebound, setRebound] = useState<ScreenerResult[]>([]);
   const [screenerConfig, setScreenerConfig] = useState<ScreenerConfig | null>(null);
@@ -110,8 +111,9 @@ export default function App() {
   };
 
   const reloadScreener = () => {
-    return Promise.all([api.screener("trend"), api.screener("rebound"), api.screenerStatus()])
-      .then(([trendData, reboundData, statusData]) => {
+    return Promise.all([api.screener("balanced"), api.screener("trend"), api.screener("rebound"), api.screenerStatus()])
+      .then(([balancedData, trendData, reboundData, statusData]) => {
+        setBalanced(balancedData);
         setTrend(trendData);
         setRebound(reboundData);
         setScreenerStatus(statusData);
@@ -334,6 +336,7 @@ export default function App() {
       {tab === "screener" && (
         <ScreenerPage
           trend={trend}
+          balanced={balanced}
           rebound={rebound}
           config={screenerConfig}
           status={screenerStatus}
@@ -1516,6 +1519,7 @@ function normalizeSymbols(symbols: string[]) {
 }
 
 function ScreenerPage(props: {
+  balanced: ScreenerResult[];
   trend: ScreenerResult[];
   rebound: ScreenerResult[];
   config: ScreenerConfig | null;
@@ -1526,9 +1530,17 @@ function ScreenerPage(props: {
   onWatch: (symbol: string) => Promise<void>;
 }) {
   const [view, setView] = useState<"lists" | "manage">("lists");
+  const [activeList, setActiveList] = useState<"balanced" | "trend" | "rebound">("balanced");
   const [newSymbol, setNewSymbol] = useState("");
   const [manageStatus, setManageStatus] = useState("");
-  const allRows = [...props.trend, ...props.rebound];
+  const allRows = [...props.balanced, ...props.trend, ...props.rebound];
+  const activeRows = activeList === "balanced" ? props.balanced : activeList === "trend" ? props.trend : props.rebound;
+  const activeTitle = activeList === "balanced" ? "综合优选榜" : activeList === "trend" ? "趋势追强榜" : "超跌反弹榜";
+  const activeSubtitle = activeList === "balanced"
+    ? "综合趋势、位置、量能、波动和风险后的默认候选"
+    : activeList === "trend"
+      ? "找正在走强的行业龙头和趋势候选"
+      : "找跌幅充分但出现企稳迹象的候选";
   const generatedAt = allRows[0]?.generated_at ? new Date(allRows[0].generated_at).toLocaleString("zh-CN", { hour12: false }) : "--";
   const passCount = allRows.filter((row) => row.risk_status === "通过").length;
   const strongCount = props.trend.filter((row) => row.score >= 75).length;
@@ -1598,15 +1610,20 @@ function ScreenerPage(props: {
         <div className="market-pulse">
           <Metric label="扫描结果" value={`${allRows.length} 条`} />
           <Metric label="风险通过" value={`${passCount} 条`} />
+          <Metric label="综合优选" value={`${props.balanced.filter((row) => row.score >= 70).length} 只`} tone={props.balanced.some((row) => row.score >= 70) ? "up" : undefined} />
           <Metric label="强趋势" value={`${strongCount} 只`} tone={strongCount > 0 ? "up" : undefined} />
           <Metric label="反弹候选" value={`${reboundCount} 只`} tone={reboundCount > 0 ? "up" : undefined} />
           <Metric label="扫描成功" value={`${props.status?.success_count ?? 0} 只`} />
           <Metric label="生成时间" value={generatedAt} />
         </div>
         {view === "lists" ? (
-          <div className="lists-grid">
-            <ResultList title="趋势追强榜" subtitle="找正在走强的行业龙头和趋势候选" rows={props.trend} onOpen={props.onOpen} onWatch={props.onWatch} />
-            <ResultList title="超跌反弹榜" subtitle="找跌幅充分但出现企稳迹象的候选" rows={props.rebound} onOpen={props.onOpen} onWatch={props.onWatch} />
+          <div className="lists-grid single-list">
+            <div className="subtabs list-tabs">
+              <button className={activeList === "balanced" ? "active" : ""} onClick={() => setActiveList("balanced")}>综合优选</button>
+              <button className={activeList === "trend" ? "active" : ""} onClick={() => setActiveList("trend")}>趋势追强</button>
+              <button className={activeList === "rebound" ? "active" : ""} onClick={() => setActiveList("rebound")}>超跌反弹</button>
+            </div>
+            <ResultList title={activeTitle} subtitle={activeSubtitle} rows={activeRows} onOpen={props.onOpen} onWatch={props.onWatch} />
           </div>
         ) : (
           <section className="panel pool-manager">

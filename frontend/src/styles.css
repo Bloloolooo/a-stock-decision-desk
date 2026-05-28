@@ -866,6 +866,15 @@ td small {
   gap: 12px;
 }
 
+.lists-grid.single-list {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.list-tabs {
+  justify-self: start;
+  margin-bottom: 0;
+}
+
 .result-list {
   padding: 0;
   overflow: hidden;

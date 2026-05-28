@@ -85,7 +85,7 @@ export const api = {
   dashboard: (symbol: string, period: string) => getJson<DashboardData>(`/market/dashboard/${symbol}?period=${period}`),
   decision: (symbol: string) => getJson<DecisionCenter>(`/decision/${symbol}`),
   risk: (symbol: string) => getJson<RiskAdvice>(`/risk/advice/${symbol}`),
-  screener: (type: "trend" | "rebound") => getJson<ScreenerResult[]>(`/screener/results?type=${type}`),
+  screener: (type: "balanced" | "trend" | "rebound") => getJson<ScreenerResult[]>(`/screener/results?type=${type}`),
   screenerConfig: () => getJson<ScreenerConfig>("/screener/config"),
   updateScreenerConfig: (symbols: string[]) => putJson<ScreenerConfig>("/screener/config", { symbols }),
   screenerStatus: () => getJson<ScreenerStatus>("/screener/status"),

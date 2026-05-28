@@ -60,15 +60,22 @@ def test_screener_scores_real_bars(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(screener_module, "market_data", FakeMarketData())
     service = ScreenerService()
 
+    balanced = service.results("balanced")
     trend = service.results("trend")
     rebound = service.results("rebound")
 
+    assert balanced[0].list_type == "balanced"
+    assert balanced[0].score >= 0
+    assert any(item["name"] == "入选类型" for item in balanced[0].factors)
+    assert any(item["name"] == "波动风险" for item in balanced[0].factors)
     assert trend[0].symbol == "000001"
     assert "5日" in trend[0].reason
     assert any(item["name"] == "均线结构" for item in trend[0].factors)
+    assert any(item["name"] == "放量突破" for item in trend[0].factors)
     assert rebound[0].symbol == "000002"
     assert "距20日高点" in rebound[0].reason
     assert any(item["name"] == "20日回撤" for item in rebound[0].factors)
+    assert any(item["name"] == "连续下跌" for item in rebound[0].factors)
     assert any(row.risk_status == "观察：流动性偏弱" for row in trend)
 
 

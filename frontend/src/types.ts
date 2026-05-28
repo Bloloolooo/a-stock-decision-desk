@@ -115,7 +115,7 @@ export type TradeRecord = {
 };
 
 export type ScreenerResult = {
-  list_type: "trend" | "rebound";
+  list_type: "balanced" | "trend" | "rebound";
   symbol: string;
   name: string;
   score: number;

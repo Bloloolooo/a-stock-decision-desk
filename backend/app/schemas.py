@@ -192,7 +192,7 @@ class BacktestResult(BaseModel):
 
 
 class ScreenerResult(BaseModel):
-    list_type: Literal["trend", "rebound"]
+    list_type: Literal["balanced", "trend", "rebound"]
     symbol: str
     name: str
     score: int
