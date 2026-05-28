@@ -12,8 +12,8 @@ async function requestError(response: Response) {
   }
 }
 
-async function getJson<T>(path: string): Promise<T> {
-  const response = await fetch(`${API_BASE}${path}`);
+async function getJson<T>(path: string, signal?: AbortSignal): Promise<T> {
+  const response = await fetch(`${API_BASE}${path}`, { signal });
   if (!response.ok) {
     throw await requestError(response);
   }
@@ -82,7 +82,7 @@ export const api = {
   updateMarketSettings: (provider: string, tushare_token: string) => putJson<MarketSettings>("/market/settings", { provider, tushare_token }),
   marketPeriods: () => getJson<MarketPeriod[]>("/market/periods"),
   bars: (symbol: string, period: string) => getJson<PriceBar[]>(`/market/bars/${symbol}?period=${period}`),
-  dashboard: (symbol: string, period: string) => getJson<DashboardData>(`/market/dashboard/${symbol}?period=${period}`),
+  dashboard: (symbol: string, period: string, signal?: AbortSignal) => getJson<DashboardData>(`/market/dashboard/${symbol}?period=${period}`, signal),
   decision: (symbol: string) => getJson<DecisionCenter>(`/decision/${symbol}`),
   risk: (symbol: string) => getJson<RiskAdvice>(`/risk/advice/${symbol}`),
   screener: (type: "balanced" | "trend" | "rebound") => getJson<ScreenerResult[]>(`/screener/results?type=${type}`),

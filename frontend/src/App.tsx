@@ -85,6 +85,10 @@ export default function App() {
   const [autoRefreshSeconds, setAutoRefreshSeconds] = useState(10);
   const [status, setStatus] = useState("加载中");
   const marketRequestRef = useRef(0);
+  const marketAbortRef = useRef<AbortController | null>(null);
+  const marketLoadingRef = useRef(false);
+  const marketLoadingKeyRef = useRef("");
+  const lastScreenerScanRef = useRef<string | null>(null);
 
   const reloadPortfolio = () => {
     return Promise.all([api.summary(), api.positions(), api.watchlist()])
@@ -99,10 +103,21 @@ export default function App() {
   };
 
   const reloadMarket = (symbol = selectedSymbol, targetPeriod = period) => {
+    const requestKey = `${symbol}:${targetPeriod}`;
+    if (marketLoadingRef.current) {
+      if (marketLoadingKeyRef.current === requestKey) {
+        return Promise.resolve();
+      }
+      marketAbortRef.current?.abort();
+    }
     const requestId = marketRequestRef.current + 1;
     marketRequestRef.current = requestId;
+    marketLoadingRef.current = true;
+    marketLoadingKeyRef.current = requestKey;
+    const controller = new AbortController();
+    marketAbortRef.current = controller;
     setStatus(`刷新 ${symbol} 行情中`);
-    return api.dashboard(symbol, targetPeriod)
+    return api.dashboard(symbol, targetPeriod, controller.signal)
       .then((dashboard) => {
         if (requestId !== marketRequestRef.current) return;
         setBars(dashboard.bars);
@@ -111,9 +126,18 @@ export default function App() {
         setMarketStatus(dashboard.market_status);
         setStatus(`${dashboard.symbol} · ${dashboard.market_status.description}已更新`);
       })
-      .catch(() => {
+      .catch((error) => {
+        if (error instanceof DOMException && error.name === "AbortError") return;
         if (requestId !== marketRequestRef.current) return;
         setStatus(`${symbol} 行情刷新失败`);
+      })
+      .finally(() => {
+        if (requestId !== marketRequestRef.current) return;
+        marketLoadingRef.current = false;
+        marketLoadingKeyRef.current = "";
+        if (marketAbortRef.current === controller) {
+          marketAbortRef.current = null;
+        }
       });
   };
 
@@ -124,6 +148,7 @@ export default function App() {
         setTrend(trendData);
         setRebound(reboundData);
         setScreenerStatus(statusData);
+        lastScreenerScanRef.current = statusData.last_scan_at ?? null;
       });
   };
 
@@ -272,7 +297,9 @@ export default function App() {
       api.screenerStatus()
         .then((statusData) => {
           setScreenerStatus(statusData);
-          if (statusData.scan_status === "running" || statusData.scan_status === "ready") {
+          const lastScanAt = statusData.last_scan_at ?? null;
+          const hasNewScan = statusData.scan_status === "ready" && lastScanAt !== lastScreenerScanRef.current;
+          if (statusData.scan_status === "running" || hasNewScan) {
             reloadScreener().catch(() => undefined);
           }
         })
