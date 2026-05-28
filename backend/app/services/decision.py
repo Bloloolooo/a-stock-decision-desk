@@ -287,7 +287,7 @@ class DecisionService:
             latest_psy,
             latest_dmi,
         )
-        advice = self._advice(matrix, volume_status, game, chip_analysis, last.close, support, resistance)
+        advice = self._advice(matrix, volume_status, game, chip_analysis, last.close, support, resistance, market_regime, trading_plan)
 
         result = DecisionCenter(
             symbol=symbol,
@@ -528,10 +528,58 @@ class DecisionService:
         close: float,
         support: float,
         resistance: float,
+        market_regime: str,
+        trading_plan: TradingPlan,
     ) -> DecisionAdvice:
-        score = 50 + sum(item.contribution for item in matrix)
-        reasons = [f"{item.name}{item.status}：{item.contribution:+d} 分" for item in matrix]
+        group_scores = {
+            "趋势": sum(item.contribution for item in matrix if item.group == "趋势"),
+            "量能": sum(item.contribution for item in matrix if item.group == "量能"),
+            "动量": sum(item.contribution for item in matrix if item.group == "动量"),
+            "位置": sum(item.contribution for item in matrix if item.group == "位置"),
+        }
+        trend_score = group_scores["趋势"]
+        volume_score = group_scores["量能"]
+        momentum_score = group_scores["动量"]
+        position_score = group_scores["位置"]
         warnings: list[str] = []
+        reasons = [
+            f"分层评分：趋势 {trend_score:+d}、量能 {volume_score:+d}、动量 {momentum_score:+d}、位置 {position_score:+d}",
+            f"交易计划：{market_regime}，风险收益比 {trading_plan.risk_reward_ratio:.2f}R，期望值 {trading_plan.expectancy:+.2f}",
+        ]
+        if trend_score < 0 and momentum_score > 0:
+            momentum_score = round(momentum_score * 0.35)
+            warnings.append("趋势层偏弱，短线动量信号已降权，避免只看超卖或金叉抢反弹。")
+        if trend_score <= -10:
+            position_score = min(position_score, 0)
+            warnings.append("趋势层明显偏空，筹码或情绪支撑只作为观察，不作为主动买入依据。")
+        confirmation_bonus = 0
+        if trend_score >= 12 and volume_score >= 5:
+            confirmation_bonus += 6
+            reasons.append("趋势与量能同向，买入信号获得确认加分。")
+        if trend_score > 0 and volume_score <= -5:
+            confirmation_bonus -= 5
+            warnings.append("趋势尚可但量能不足，突破信号需要等待补量确认。")
+        regime_penalty = 0
+        if market_regime == "高波动":
+            regime_penalty -= 6
+            warnings.append("市场状态高波动，仓位和止损需要更保守。")
+        elif market_regime == "空头趋势":
+            regime_penalty -= 10
+            warnings.append("市场状态为空头趋势，默认降低买入评级。")
+        expectancy_penalty = -8 if trading_plan.expectancy <= 0 else 0
+        if expectancy_penalty:
+            warnings.append("当前价位计划的期望值不高，等待更好的买入价或更明确的放量确认。")
+        score = (
+            50
+            + trend_score * 1.15
+            + volume_score * 1.05
+            + momentum_score * 0.75
+            + position_score * 0.65
+            + confirmation_bonus
+            + regime_penalty
+            + expectancy_penalty
+        )
+        reasons.extend([f"{item.name}{item.status}：{item.contribution:+d} 分" for item in matrix])
         if close > resistance * 0.97:
             warnings.append("价格接近 20 日压力区，追高需要等待放量确认。")
         if close < support * 1.03:

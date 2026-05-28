@@ -59,4 +59,5 @@ def test_decision_center_calculates_core_indicators(monkeypatch) -> None:
     assert result.trading_plan.buy_breakout_price > result.current_price
     assert result.trading_plan.take_profit_2 > result.trading_plan.take_profit_1
     assert result.trading_plan.risk_reward_ratio > 0
+    assert result.advice.reasons[0].startswith("分层评分")
     assert result.advice.action in {"可买/可加仓", "持有观察", "观望", "减仓/规避"}
