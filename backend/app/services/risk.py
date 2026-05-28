@@ -30,6 +30,43 @@ def average_true_range(bars, window: int = 14) -> float:
     return sum(scoped) / len(scoped) if scoped else 0.0
 
 
+def moving_average(values: list[float], window: int) -> float:
+    scoped = values[-window:]
+    return sum(scoped) / len(scoped) if scoped else 0.0
+
+
+def market_regime_from_bars(bars) -> str:
+    if not bars:
+        return "未知"
+    closes = [bar.close for bar in bars]
+    close = closes[-1]
+    ma20 = moving_average(closes, 20)
+    ma60 = moving_average(closes, 60)
+    atr = average_true_range(bars[-60:])
+    atr_ratio = atr / close if close else 0.0
+    if atr_ratio >= 0.065:
+        return "高波动"
+    if close > ma20 > ma60:
+        return "多头趋势"
+    if close < ma20 < ma60:
+        return "空头趋势"
+    if ma20 and abs(close / ma20 - 1) <= 0.03:
+        return "震荡"
+    return "趋势过渡"
+
+
+def atr_multiplier_for_regime(regime: str) -> float:
+    if regime == "多头趋势":
+        return 2.5
+    if regime == "震荡":
+        return 1.5
+    if regime == "高波动":
+        return 2.2
+    if regime == "空头趋势":
+        return 1.6
+    return 2.0
+
+
 def trading_edge_from_records() -> tuple[float, float, str]:
     records = list(reversed(portfolio_service.trade_records(limit=300)))
     lots: dict[str, list[tuple[int, float]]] = {}
@@ -68,8 +105,17 @@ class RiskService:
         current_price = market_data.latest_price(symbol)
         daily = market_data.bars(symbol=symbol, period="daily")
         atr = average_true_range(daily[-60:])
-        stop_loss_distance = max(atr * 2, current_price * 0.03)
+        market_regime = market_regime_from_bars(daily[-120:])
+        atr_multiplier = atr_multiplier_for_regime(market_regime)
+        minimum_stop_pct = 0.025 if market_regime == "震荡" else 0.03
+        stop_loss_distance = max(atr * atr_multiplier, current_price * minimum_stop_pct)
         stop_loss_price = round(max(0.01, current_price - stop_loss_distance), 2)
+        entry_price = position.average_cost if position else current_price
+        per_share_risk = max(entry_price - stop_loss_price, 0.01)
+        take_profit_1 = round(entry_price + per_share_risk, 2)
+        take_profit_2 = round(entry_price + per_share_risk * 2, 2)
+        recent_high = max((bar.high for bar in daily[-30:]), default=current_price)
+        trailing_stop = round(max(stop_loss_price, recent_high - atr * atr_multiplier), 2)
         fixed_amount = fixed_risk_position_amount(summary.total_assets, current_price, stop_loss_price, 0.012)
         win_rate, win_loss_ratio, kelly_source = trading_edge_from_records()
         kelly_ratio = fractional_kelly(win_rate=win_rate, win_loss_ratio=win_loss_ratio, fraction=0.25)
@@ -113,11 +159,17 @@ class RiskService:
             suggested_max_ratio=0.35,
             max_buy_amount=round(max_buy_amount, 2),
             stop_loss_price=stop_loss_price,
+            atr_multiplier=atr_multiplier,
+            market_regime=market_regime,
+            take_profit_1=take_profit_1,
+            take_profit_2=take_profit_2,
+            trailing_stop=trailing_stop,
             single_stock_risk=round(single_stock_risk, 2),
             message=message,
             signal_sources=[
                 f"仓位：当前单票约 {position_ratio * 100:.1f}%，建议区间 25%-35%",
-                f"风控：ATR约 {atr:.2f}，止损距离约 {stop_loss_gap * 100:.1f}%，单票风险 {round(single_stock_risk, 2)} 元",
+                f"风控：{market_regime}，ATR约 {atr:.2f}，使用 {atr_multiplier:.1f} 倍ATR，止损距离约 {stop_loss_gap * 100:.1f}%",
+                f"止盈：第一目标 {take_profit_1:.2f}，第二目标 {take_profit_2:.2f}，移动止盈 {trailing_stop:.2f}",
                 f"资金：现金占比约 {cash_ratio * 100:.1f}%，最大可加仓 {round(max_buy_amount, 2)} 元",
                 f"凯利：{kelly_source}，当前使用 {kelly_ratio * 100:.1f}% 分数凯利上限",
             ],

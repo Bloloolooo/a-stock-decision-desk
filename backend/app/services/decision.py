@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from app.schemas import ChipAnalysis, ChipLevel, DecisionAdvice, DecisionCenter, IndicatorPoint, IndicatorScore, IntradayGame, PriceBar
+from app.schemas import ChipAnalysis, ChipLevel, DecisionAdvice, DecisionCenter, IndicatorPoint, IndicatorScore, IntradayGame, PriceBar, TradingPlan
 from app.services.market_data import market_data
 
 DECISION_CACHE_TTL_SECONDS = 60
@@ -21,6 +21,18 @@ def _ema(values: list[float], span: int) -> list[float]:
     for value in values[1:]:
         result.append(value * alpha + result[-1] * (1 - alpha))
     return result
+
+
+def _atr(bars: list[PriceBar], window: int = 14) -> float:
+    if len(bars) < 2:
+        return 0.0
+    ranges = []
+    for index in range(1, len(bars)):
+        current = bars[index]
+        previous = bars[index - 1]
+        ranges.append(max(current.high - current.low, abs(current.high - previous.close), abs(current.low - previous.close)))
+    scoped = ranges[-window:]
+    return sum(scoped) / len(scoped) if scoped else 0.0
 
 
 def _macd(bars: list[PriceBar]) -> list[IndicatorPoint]:
@@ -244,6 +256,7 @@ class DecisionService:
         latest_wr = wr_points[-1]
         latest_psy = psy_points[-1]
         latest_dmi = dmi_points[-1]
+        atr = _atr(usable[-60:])
 
         trend_status = self._trend_status(last.close, ma5, ma20, ma60)
         volume_status = self._volume_status(volume_ratio, last.amount, avg_volume_20 * last.close)
@@ -256,6 +269,8 @@ class DecisionService:
         game = _intraday_game(intraday[-300:])
         chips = _chip_levels(usable)
         chip_analysis = _chip_analysis(chips, last.close)
+        market_regime = self._market_regime(last.close, ma20, ma60, atr, latest_dmi)
+        trading_plan = self._trading_plan(usable, market_regime, atr)
         matrix = self._indicator_matrix(
             trend_status,
             volume_status,
@@ -282,6 +297,7 @@ class DecisionService:
             volume_status=volume_status,
             volume_ratio=round(volume_ratio, 2),
             turnover_rate=last.turnover_rate,
+            market_regime=market_regime,
             support_price=round(support, 2),
             resistance_price=round(resistance, 2),
             macd_status=macd_status,
@@ -301,6 +317,7 @@ class DecisionService:
             dmi=dmi_points,
             indicator_matrix=matrix,
             advice=advice,
+            trading_plan=trading_plan,
             updated_at=datetime.now(),
         )
         self._cache[symbol] = (datetime.now(), result)
@@ -394,6 +411,79 @@ class DecisionService:
         if mdi > pdi:
             return "空头占优"
         return "趋势不明"
+
+    def _market_regime(self, close: float, ma20: float, ma60: float, atr: float, dmi: IndicatorPoint) -> str:
+        atr_ratio = atr / close if close else 0.0
+        adx = dmi.adx or 0.0
+        pdi = dmi.pdi or 0.0
+        mdi = dmi.mdi or 0.0
+        if atr_ratio >= 0.065:
+            return "高波动"
+        if adx >= 25 and pdi > mdi and close > ma20 > ma60:
+            return "多头趋势"
+        if adx >= 25 and mdi > pdi and close < ma20:
+            return "空头趋势"
+        if adx < 20 or abs(close / ma20 - 1) <= 0.03:
+            return "震荡"
+        return "趋势过渡"
+
+    def _atr_multiplier(self, market_regime: str) -> float:
+        if market_regime == "多头趋势":
+            return 2.5
+        if market_regime == "震荡":
+            return 1.5
+        if market_regime == "高波动":
+            return 2.2
+        if market_regime == "空头趋势":
+            return 1.6
+        return 2.0
+
+    def _trading_plan(self, bars: list[PriceBar], market_regime: str, atr: float) -> TradingPlan:
+        last = bars[-1]
+        closes = [bar.close for bar in bars]
+        ma20 = _ma(closes, 20)
+        scoped = bars[-20:]
+        lowest_20 = min(bar.low for bar in scoped)
+        highest_20 = max(bar.high for bar in scoped)
+        highest_since_entry = max(bar.high for bar in bars[-30:])
+        multiplier = self._atr_multiplier(market_regime)
+        buy_support = max(0.01, max(lowest_20, ma20 * 0.98) if ma20 else lowest_20)
+        buy_pullback = max(0.01, ma20 * 1.01 if ma20 else last.close)
+        buy_breakout = max(0.01, highest_20 * 1.005)
+        stop_distance = max(atr * multiplier, last.close * (0.025 if market_regime == "震荡" else 0.03))
+        stop_loss = max(0.01, last.close - stop_distance)
+        entry = buy_pullback if market_regime in {"多头趋势", "趋势过渡"} else buy_support
+        risk = max(entry - stop_loss, 0.01)
+        take_profit_1 = entry + risk
+        take_profit_2 = entry + risk * 2
+        trailing_stop = max(stop_loss, highest_since_entry - atr * multiplier) if atr else stop_loss
+        risk_reward_ratio = (take_profit_2 - entry) / risk if risk else 0.0
+        expectancy = 0.52 * risk_reward_ratio - 0.48
+        if market_regime == "多头趋势":
+            summary = "趋势市优先等回踩不破或放量突破，止损放宽，止盈用移动保护。"
+        elif market_regime == "震荡":
+            summary = "震荡市优先靠近支撑低吸，止损收紧，第一止盈位要更果断。"
+        elif market_regime == "高波动":
+            summary = "高波动阶段降低仓位，只有价位给足安全边际再考虑。"
+        elif market_regime == "空头趋势":
+            summary = "空头趋势中只保留观察计划，不主动扩大风险。"
+        else:
+            summary = "趋势切换阶段等待量能和价格确认，不追未确认突破。"
+        return TradingPlan(
+            market_regime=market_regime,
+            atr=round(atr, 3),
+            atr_multiplier=multiplier,
+            buy_support_price=round(buy_support, 2),
+            buy_pullback_price=round(buy_pullback, 2),
+            buy_breakout_price=round(buy_breakout, 2),
+            stop_loss_price=round(stop_loss, 2),
+            take_profit_1=round(take_profit_1, 2),
+            take_profit_2=round(take_profit_2, 2),
+            trailing_stop=round(trailing_stop, 2),
+            risk_reward_ratio=round(risk_reward_ratio, 2),
+            expectancy=round(expectancy, 3),
+            plan_summary=summary,
+        )
 
     def _indicator_matrix(
         self,

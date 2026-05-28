@@ -125,6 +125,11 @@ class RiskAdvice(BaseModel):
     suggested_max_ratio: float
     max_buy_amount: float
     stop_loss_price: float
+    atr_multiplier: float = 2.0
+    market_regime: str = "未知"
+    take_profit_1: float | None = None
+    take_profit_2: float | None = None
+    trailing_stop: float | None = None
     single_stock_risk: float
     message: str
     signal_sources: list[str]
@@ -307,6 +312,22 @@ class DecisionAdvice(BaseModel):
     warnings: list[str]
 
 
+class TradingPlan(BaseModel):
+    market_regime: str
+    atr: float
+    atr_multiplier: float
+    buy_support_price: float
+    buy_pullback_price: float
+    buy_breakout_price: float
+    stop_loss_price: float
+    take_profit_1: float
+    take_profit_2: float
+    trailing_stop: float
+    risk_reward_ratio: float
+    expectancy: float
+    plan_summary: str
+
+
 class IndicatorScore(BaseModel):
     group: str
     name: str
@@ -323,6 +344,7 @@ class DecisionCenter(BaseModel):
     volume_status: str
     volume_ratio: float
     turnover_rate: float | None = None
+    market_regime: str
     support_price: float
     resistance_price: float
     macd_status: str
@@ -342,6 +364,7 @@ class DecisionCenter(BaseModel):
     dmi: list[IndicatorPoint]
     indicator_matrix: list[IndicatorScore]
     advice: DecisionAdvice
+    trading_plan: TradingPlan
     updated_at: datetime
 
 

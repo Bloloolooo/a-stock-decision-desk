@@ -55,4 +55,8 @@ def test_decision_center_calculates_core_indicators(monkeypatch) -> None:
     assert len(result.macd) > 0
     assert len(result.kdj) > 0
     assert len(result.chips) > 0
+    assert result.market_regime in {"多头趋势", "空头趋势", "震荡", "高波动", "趋势过渡"}
+    assert result.trading_plan.buy_breakout_price > result.current_price
+    assert result.trading_plan.take_profit_2 > result.trading_plan.take_profit_1
+    assert result.trading_plan.risk_reward_ratio > 0
     assert result.advice.action in {"可买/可加仓", "持有观察", "观望", "减仓/规避"}

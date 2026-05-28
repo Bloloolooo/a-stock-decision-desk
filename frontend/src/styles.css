@@ -1323,6 +1323,41 @@ td small {
   gap: 8px;
 }
 
+.trade-plan-card {
+  display: grid;
+  gap: 7px;
+  padding: 10px;
+  border: 1px solid #dce6f0;
+  border-radius: 7px;
+  background: #f8fbfe;
+}
+
+.trade-plan-card span {
+  color: #667085;
+  font-size: 12px;
+}
+
+.trade-plan-card p {
+  margin: 0;
+  color: #405064;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.trade-plan-card div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.trade-plan-card strong {
+  padding: 4px 6px;
+  border-radius: 5px;
+  background: #e8eff7;
+  color: #142238;
+  font-size: 12px;
+}
+
 .chip-list {
   display: grid;
   gap: 7px;

@@ -403,15 +403,24 @@ function HomePage(props: {
   const selectedPosition = props.positions.find((position) => position.symbol === props.selectedSymbol);
   const symbolInputRef = useRef<HTMLInputElement>(null);
   const tradeLevels = useMemo(() => {
-    const buyPrice = validPrice(props.decision?.support_price);
-    const sellPrice = validPrice(props.decision?.resistance_price);
-    const stopPrice = validPrice(props.risk?.stop_loss_price);
+    const plan = props.decision?.trading_plan;
+    const buySupport = validPrice(plan?.buy_support_price ?? props.decision?.support_price);
+    const buyPullback = validPrice(plan?.buy_pullback_price);
+    const buyBreakout = validPrice(plan?.buy_breakout_price);
+    const stopPrice = validPrice(plan?.stop_loss_price ?? props.risk?.stop_loss_price);
+    const takeProfit1 = validPrice(plan?.take_profit_1 ?? props.risk?.take_profit_1);
+    const takeProfit2 = validPrice(plan?.take_profit_2 ?? props.risk?.take_profit_2);
+    const trailingStop = validPrice(plan?.trailing_stop ?? props.risk?.trailing_stop);
     return [
-      buyPrice ? { key: "buy" as const, label: "建议买入", price: buyPrice, color: "#4ea4ff" } : null,
-      sellPrice ? { key: "sell" as const, label: "建议卖出", price: sellPrice, color: "#f0b84f" } : null,
+      buySupport ? { key: "buy_support" as const, label: "支撑买入", price: buySupport, color: "#4ea4ff" } : null,
+      buyPullback ? { key: "buy_pullback" as const, label: "回踩买入", price: buyPullback, color: "#8ecae6" } : null,
+      buyBreakout ? { key: "buy_breakout" as const, label: "突破买入", price: buyBreakout, color: "#c084fc" } : null,
       stopPrice ? { key: "stop" as const, label: "止损参考", price: stopPrice, color: "#14a06f" } : null,
+      trailingStop ? { key: "trailing_stop" as const, label: "移动止盈", price: trailingStop, color: "#f97316" } : null,
+      takeProfit1 ? { key: "take_profit_1" as const, label: "止盈1", price: takeProfit1, color: "#f0b84f" } : null,
+      takeProfit2 ? { key: "take_profit_2" as const, label: "止盈2", price: takeProfit2, color: "#d94b42" } : null,
     ].filter((item): item is TradeLevel => item !== null);
-  }, [props.decision?.resistance_price, props.decision?.support_price, props.risk?.stop_loss_price]);
+  }, [props.decision?.support_price, props.decision?.trading_plan, props.risk?.stop_loss_price, props.risk?.take_profit_1, props.risk?.take_profit_2, props.risk?.trailing_stop]);
   const [cashValue, setCashValue] = useState(moneyInput(props.summary.cash));
   const [positionForm, setPositionForm] = useState({
     symbol: "",
@@ -705,10 +714,10 @@ function HomePage(props: {
           <div className="position-strip">
             <MiniStat label="买入成本" value={selectedPosition ? `${selectedPosition.average_cost.toFixed(2)} · ${selectedPosition.quantity} 股` : "无持仓"} />
             <MiniStat label="浮动盈亏" value={selectedPosition ? `${signed(selectedPosition.floating_pnl)} · ${pct(selectedPosition.floating_pnl_pct)}` : "--"} tone={selectedPosition && selectedPosition.floating_pnl >= 0 ? "up" : "down"} />
-            <MiniStat label="建议买入" value={tradeLevels.find((item) => item.key === "buy")?.price.toFixed(2) ?? "--"} />
-            <MiniStat label="建议卖出" value={tradeLevels.find((item) => item.key === "sell")?.price.toFixed(2) ?? "--"} />
+            <MiniStat label="支撑/回踩" value={`${tradeLevels.find((item) => item.key === "buy_support")?.price.toFixed(2) ?? "--"} / ${tradeLevels.find((item) => item.key === "buy_pullback")?.price.toFixed(2) ?? "--"}`} />
+            <MiniStat label="突破/止盈" value={`${tradeLevels.find((item) => item.key === "buy_breakout")?.price.toFixed(2) ?? "--"} / ${tradeLevels.find((item) => item.key === "take_profit_1")?.price.toFixed(2) ?? "--"}`} />
             <MiniStat label="止损参考" value={props.risk ? `${props.risk.stop_loss_price.toFixed(2)} · 风险 ${yuan(props.risk.single_stock_risk)}` : "--"} />
-            <MiniStat label="建议仓位" value={props.risk ? `${(props.risk.suggested_min_ratio * 100).toFixed(0)}-${(props.risk.suggested_max_ratio * 100).toFixed(0)}%` : "--"} />
+            <MiniStat label="市场/期望" value={props.decision?.trading_plan ? `${props.decision.trading_plan.market_regime} · E ${props.decision.trading_plan.expectancy.toFixed(2)}` : "--"} />
           </div>
         </section>
 
@@ -974,7 +983,7 @@ function chartDmi(bars: Array<{ high: number; low: number; close: number }>, win
 type MainChartType = "standard" | "boll" | "bbiboll";
 type SubChartType = "volume" | "macd" | "kdj" | "ratio" | "rsi" | "wr" | "psy" | "dmi";
 type TradeLevel = {
-  key: "buy" | "sell" | "stop";
+  key: "buy_support" | "buy_pullback" | "buy_breakout" | "stop" | "take_profit_1" | "take_profit_2" | "trailing_stop";
   label: string;
   price: number;
   color: string;
@@ -1294,7 +1303,7 @@ function KLineChart({ bars, mode = "normal", tradeLevels = [] }: { bars: PriceBa
         price: item.price,
         color: item.color,
         lineWidth: 1,
-        lineStyle: item.key === "stop" ? LineStyle.Dotted : LineStyle.Dashed,
+        lineStyle: item.key === "stop" || item.key === "trailing_stop" ? LineStyle.Dotted : LineStyle.Dashed,
         axisLabelVisible: true,
         title: item.label,
       });
@@ -1523,6 +1532,19 @@ function DecisionPanel({ decision }: { decision: DecisionCenter | null }) {
         <MiniStat label="RSI/WR" value={`${decision.rsi_status} · ${decision.wr_status}`} />
         <MiniStat label="分时博弈" value={`${decision.intraday_game.status} · 多 ${decision.intraday_game.buy_power_pct.toFixed(1)}%`} />
         <MiniStat label="支撑/压力" value={`${decision.support_price.toFixed(2)} / ${decision.resistance_price.toFixed(2)}`} />
+        <MiniStat label="市场状态" value={`${decision.trading_plan.market_regime} · ATRx${decision.trading_plan.atr_multiplier.toFixed(1)}`} />
+        <MiniStat label="风险收益" value={`${decision.trading_plan.risk_reward_ratio.toFixed(2)}R · E ${decision.trading_plan.expectancy.toFixed(2)}`} />
+      </div>
+      <div className="trade-plan-card">
+        <span>交易计划</span>
+        <p>{decision.trading_plan.plan_summary}</p>
+        <div>
+          <strong>支撑 {decision.trading_plan.buy_support_price.toFixed(2)}</strong>
+          <strong>回踩 {decision.trading_plan.buy_pullback_price.toFixed(2)}</strong>
+          <strong>突破 {decision.trading_plan.buy_breakout_price.toFixed(2)}</strong>
+          <strong>止损 {decision.trading_plan.stop_loss_price.toFixed(2)}</strong>
+          <strong>止盈 {decision.trading_plan.take_profit_1.toFixed(2)} / {decision.trading_plan.take_profit_2.toFixed(2)}</strong>
+        </div>
       </div>
       <div className="chip-list">
         <span>筹码密集区 · {decision.chip_analysis.status}</span>

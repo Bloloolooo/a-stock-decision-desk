@@ -94,6 +94,11 @@ export type RiskAdvice = {
   suggested_max_ratio: number;
   max_buy_amount: number;
   stop_loss_price: number;
+  atr_multiplier: number;
+  market_regime: string;
+  take_profit_1?: number | null;
+  take_profit_2?: number | null;
+  trailing_stop?: number | null;
   single_stock_risk: number;
   message: string;
   signal_sources: string[];
@@ -271,6 +276,22 @@ export type IndicatorScore = {
   contribution: number;
 };
 
+export type TradingPlan = {
+  market_regime: string;
+  atr: number;
+  atr_multiplier: number;
+  buy_support_price: number;
+  buy_pullback_price: number;
+  buy_breakout_price: number;
+  stop_loss_price: number;
+  take_profit_1: number;
+  take_profit_2: number;
+  trailing_stop: number;
+  risk_reward_ratio: number;
+  expectancy: number;
+  plan_summary: string;
+};
+
 export type DecisionCenter = {
   symbol: string;
   name: string;
@@ -279,6 +300,7 @@ export type DecisionCenter = {
   volume_status: string;
   volume_ratio: number;
   turnover_rate?: number | null;
+  market_regime: string;
   support_price: number;
   resistance_price: number;
   macd_status: string;
@@ -304,6 +326,7 @@ export type DecisionCenter = {
   psy: IndicatorPoint[];
   dmi: IndicatorPoint[];
   indicator_matrix: IndicatorScore[];
+  trading_plan: TradingPlan;
   advice: {
     action: string;
     confidence: number;
