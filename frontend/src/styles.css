@@ -338,6 +338,25 @@ td small {
   opacity: 0.45;
 }
 
+.trade-quick-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.trade-quick-actions button {
+  padding: 6px 8px;
+  background: #e8eff7;
+  color: #1f4f8f;
+  font-size: 12px;
+}
+
+.trade-quick-actions span {
+  color: #68758a;
+  font-size: 12px;
+}
+
 .entry-form p {
   margin: 0;
   color: #1f4f8f;

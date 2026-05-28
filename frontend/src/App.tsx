@@ -436,6 +436,9 @@ function HomePage(props: {
   const [fullscreen, setFullscreen] = useState(false);
   const [formStatus, setFormStatus] = useState("");
   const [tradeSubmitting, setTradeSubmitting] = useState<"buy" | "sell" | null>(null);
+  const sellSymbol = sellForm.symbol.replace(/\D/g, "");
+  const sellablePosition = props.positions.find((position) => position.symbol === sellSymbol);
+  const quotePrice = props.risk?.current_price ?? selectedPosition?.last_price ?? null;
 
   useEffect(() => {
     setCashValue(moneyInput(props.summary.cash));
@@ -538,6 +541,24 @@ function HomePage(props: {
       return;
     }
     props.onSelectSymbol(symbol);
+  };
+
+  const fillBuyPrice = () => {
+    if (!quotePrice) return;
+    setPositionForm((current) => ({ ...current, average_cost: quotePrice.toFixed(2) }));
+  };
+
+  const fillSellPrice = () => {
+    if (!quotePrice) return;
+    setSellForm((current) => ({ ...current, sell_price: quotePrice.toFixed(2) }));
+  };
+
+  const fillSellAll = () => {
+    if (!sellablePosition) {
+      setFormStatus("当前代码没有持仓，无法全部卖出。");
+      return;
+    }
+    setSellForm((current) => ({ ...current, quantity: String(sellablePosition.quantity) }));
   };
 
   const renamePosition = async (position: Position) => {
@@ -643,6 +664,10 @@ function HomePage(props: {
               买入均价
               <input value={positionForm.average_cost} onChange={(event) => setPositionForm({ ...positionForm, average_cost: event.target.value })} inputMode="decimal" />
             </label>
+            <div className="trade-quick-actions">
+              <button type="button" onClick={fillBuyPrice} disabled={!quotePrice}>填当前价</button>
+              <span>当前价 {quotePrice?.toFixed(2) ?? "--"}</span>
+            </div>
             <button onClick={savePosition} disabled={Boolean(tradeSubmitting) || !positionForm.symbol || !positionForm.quantity || !positionForm.average_cost}>
               {tradeSubmitting === "buy" ? "买入处理中" : "记录买入"}
             </button>
@@ -661,6 +686,11 @@ function HomePage(props: {
               卖出价格
               <input value={sellForm.sell_price} onChange={(event) => setSellForm({ ...sellForm, sell_price: event.target.value })} inputMode="decimal" />
             </label>
+            <div className="trade-quick-actions">
+              <button type="button" onClick={fillSellAll} disabled={!sellablePosition}>全部卖出</button>
+              <button type="button" onClick={fillSellPrice} disabled={!quotePrice}>填当前价</button>
+              <span>可卖 {sellablePosition?.quantity ?? 0} 股</span>
+            </div>
             <button onClick={sellPosition} disabled={Boolean(tradeSubmitting) || !sellForm.symbol || !sellForm.quantity || !sellForm.sell_price}>
               {tradeSubmitting === "sell" ? "卖出处理中" : "记录卖出"}
             </button>
