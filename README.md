@@ -17,16 +17,23 @@ cd backend
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-uvicorn app.main:app --reload --port 8000
+python -m uvicorn app.main:app --reload --port 8000
 ```
 
 默认数据库为 `backend/stock_tool.sqlite3`。这个文件只保存在本机，不提交到仓库。
 
-默认行情源优先使用 AkShare 真实行情，失败时回退到示例数据。要强制使用离线示例数据：
+默认行情源使用 Tencent/Sina 公开行情，避免 AkShare 在部分 macOS/Python 环境下触发 `mini_racer` 原生库崩溃。要强制使用离线示例数据：
 
 ```bash
 cd backend
-MARKET_DATA_PROVIDER=sample .venv/bin/uvicorn app.main:app --reload --port 8000
+MARKET_DATA_PROVIDER=sample .venv/bin/python -m uvicorn app.main:app --reload --port 8000
+```
+
+如确需使用 AkShare，可显式开启：
+
+```bash
+cd backend
+ENABLE_AKSHARE=1 .venv/bin/python -m uvicorn app.main:app --reload --port 8000
 ```
 
 前端：

@@ -14,6 +14,11 @@ from app.schemas import MarketPeriod, MarketSettings, MarketStatus, PriceBar, St
 CACHE_TTL_SECONDS = 300
 
 
+def _akshare_enabled() -> bool:
+    value = os.getenv("ENABLE_AKSHARE", "").strip().lower()
+    return value in {"1", "true", "yes", "on"}
+
+
 def _price(value: object) -> float:
     return round(float(value), 2)
 
@@ -104,7 +109,7 @@ class SampleMarketDataProvider:
 
 class AkShareMarketDataProvider:
     provider_name = "akshare"
-    description = "AkShare/Sina 免费公开数据，失败时回退到示例数据"
+    description = "AkShare 免费公开数据，默认需显式启用"
 
     period_map = {
         "daily": "daily",
@@ -127,6 +132,8 @@ class AkShareMarketDataProvider:
         return bars[-1].close
 
     def name(self, symbol: str) -> str:
+        if not _akshare_enabled():
+            return self._safe_name(symbol)
         if symbol in self._name_cache:
             return self._name_cache[symbol]
         try:
@@ -147,6 +154,10 @@ class AkShareMarketDataProvider:
         return self._name_cache.get(symbol, self.fallback.name(symbol))
 
     def stocks(self) -> list[StockInfo]:
+        if not _akshare_enabled():
+            self.last_source = "sample"
+            self.last_error = "AkShare 默认关闭，股票列表暂用本地示例池"
+            return self.fallback.stocks()
         try:
             import akshare as ak
 
@@ -166,6 +177,16 @@ class AkShareMarketDataProvider:
             self.last_source = "sample"
             self.last_error = f"AkShare 股票列表失败：{exc}"
         return self.fallback.stocks()
+
+    def _safe_name(self, symbol: str) -> str:
+        if symbol in self._name_cache:
+            return self._name_cache[symbol]
+        sina_name = self._fetch_sina_name(symbol)
+        if sina_name:
+            self._name_cache[symbol] = sina_name
+            self.last_source = "sina"
+            return sina_name
+        return self.fallback.name(symbol)
 
     def _fetch_sina_name(self, symbol: str) -> str:
         market_symbol = self._sina_symbol(symbol)
@@ -195,6 +216,10 @@ class AkShareMarketDataProvider:
             self.last_source = "akshare"
             self.last_error = None
             return cached[1]
+
+        if not _akshare_enabled():
+            self.last_error = "AkShare 默认关闭，已使用 Sina/示例备用源；如确需 AkShare，请设置 ENABLE_AKSHARE=1"
+            return self._fetch_sina_or_sample(symbol=symbol, period=period, adjust=adjust)
 
         try:
             import akshare as ak
@@ -398,6 +423,23 @@ class AkShareMarketDataProvider:
             )
         return bars[-180:]
 
+    def _fetch_sina_or_sample(self, symbol: str, period: str, adjust: str) -> list[PriceBar]:
+        previous_error = self.last_error
+        try:
+            bars = self._fetch_sina_bars(symbol=symbol, period=period, adjust=adjust)
+            self.last_source = "sina"
+            if previous_error:
+                self.last_error = f"{previous_error}；已使用 Sina 真实行情"
+            else:
+                self.last_error = None
+            self._bars_cache[(symbol, period, adjust)] = (datetime.now(), bars)
+            return bars
+        except Exception as exc:
+            self.last_source = "sample"
+            prefix = f"{previous_error}；" if previous_error else ""
+            self.last_error = f"{prefix}Sina 失败：{exc}；已回退示例数据"
+            return self.fallback.bars(symbol=symbol, period=period, adjust=adjust)
+
     def _sina_symbol(self, symbol: str) -> str:
         return f"sh{symbol}" if symbol.startswith("6") else f"sz{symbol}"
 
@@ -405,6 +447,14 @@ class AkShareMarketDataProvider:
 class SinaMarketDataProvider(AkShareMarketDataProvider):
     provider_name = "sina"
     description = "Sina 免费公开行情"
+
+    def name(self, symbol: str) -> str:
+        return self._safe_name(symbol)
+
+    def stocks(self) -> list[StockInfo]:
+        self.last_source = "sample"
+        self.last_error = "Sina 暂无全市场股票列表接口，已使用本地示例池"
+        return self.fallback.stocks()
 
     def bars(self, symbol: str, period: str = "daily", adjust: str = "qfq") -> list[PriceBar]:
         cache_key = (symbol, period, adjust)
@@ -439,8 +489,8 @@ class TushareMarketDataProvider(AkShareMarketDataProvider):
             self.last_error = "Tushare Token 未配置"
             return self.fallback.bars(symbol=symbol, period=period, adjust=adjust)
         if period not in {"daily", "weekly", "monthly"}:
-            self.last_error = "Tushare 分时接口暂未接入，已回退 AkShare/Sina"
-            return super().bars(symbol=symbol, period=period, adjust=adjust)
+            self.last_error = "Tushare 分时接口暂未接入，已回退 Sina/示例数据"
+            return self._fetch_sina_or_sample(symbol=symbol, period=period, adjust=adjust)
         cache_key = (symbol, period, adjust)
         cached = self._bars_cache.get(cache_key)
         if cached and (datetime.now() - cached[0]).total_seconds() < CACHE_TTL_SECONDS:
@@ -488,7 +538,8 @@ class TushareMarketDataProvider(AkShareMarketDataProvider):
             return bars
         except Exception as exc:
             error = f"Tushare 失败：{exc}"
-            bars = super().bars(symbol=symbol, period=period, adjust=adjust)
+            self.last_error = error
+            bars = self._fetch_sina_or_sample(symbol=symbol, period=period, adjust=adjust)
             self.last_error = f"{error}；已使用 {self.last_source} 备用源"
             return bars
 
@@ -539,8 +590,8 @@ class EfinanceMarketDataProvider(AkShareMarketDataProvider):
 
     def bars(self, symbol: str, period: str = "daily", adjust: str = "qfq") -> list[PriceBar]:
         if period not in self.period_map:
-            self.last_error = "efinance 分时接口暂未接入，已回退 AkShare/Sina"
-            return super().bars(symbol=symbol, period=period, adjust=adjust)
+            self.last_error = "efinance 分时接口暂未接入，已回退 Sina/示例数据"
+            return self._fetch_sina_or_sample(symbol=symbol, period=period, adjust=adjust)
         cache_key = (symbol, period, adjust)
         cached = self._bars_cache.get(cache_key)
         if cached and (datetime.now() - cached[0]).total_seconds() < CACHE_TTL_SECONDS:
@@ -581,7 +632,8 @@ class EfinanceMarketDataProvider(AkShareMarketDataProvider):
             return bars
         except Exception as exc:
             error = f"efinance 失败：{exc}"
-            bars = super().bars(symbol=symbol, period=period, adjust=adjust)
+            self.last_error = error
+            bars = self._fetch_sina_or_sample(symbol=symbol, period=period, adjust=adjust)
             self.last_error = f"{error}；已使用 {self.last_source} 备用源"
             return bars
 
@@ -598,8 +650,8 @@ class BaoStockMarketDataProvider(AkShareMarketDataProvider):
 
     def bars(self, symbol: str, period: str = "daily", adjust: str = "qfq") -> list[PriceBar]:
         if period not in self.period_map:
-            self.last_error = "BaoStock 分时接口暂未接入，已回退 AkShare/Sina"
-            return super().bars(symbol=symbol, period=period, adjust=adjust)
+            self.last_error = "BaoStock 分时接口暂未接入，已回退 Sina/示例数据"
+            return self._fetch_sina_or_sample(symbol=symbol, period=period, adjust=adjust)
         cache_key = (symbol, period, adjust)
         cached = self._bars_cache.get(cache_key)
         if cached and (datetime.now() - cached[0]).total_seconds() < CACHE_TTL_SECONDS:
@@ -661,7 +713,8 @@ class BaoStockMarketDataProvider(AkShareMarketDataProvider):
             return bars
         except Exception as exc:
             error = f"BaoStock 失败：{exc}"
-            bars = super().bars(symbol=symbol, period=period, adjust=adjust)
+            self.last_error = error
+            bars = self._fetch_sina_or_sample(symbol=symbol, period=period, adjust=adjust)
             self.last_error = f"{error}；已使用 {self.last_source} 备用源"
             return bars
 
@@ -732,17 +785,6 @@ class TencentMarketDataProvider(AkShareMarketDataProvider):
             self.last_error = f"Tencent 失败：{exc}"
             return self._fetch_sina_or_sample(symbol=symbol, period=period, adjust=adjust)
 
-    def _fetch_sina_or_sample(self, symbol: str, period: str, adjust: str) -> list[PriceBar]:
-        try:
-            bars = self._fetch_sina_bars(symbol=symbol, period=period, adjust=adjust)
-            self.last_source = "sina"
-            return bars
-        except Exception as exc:
-            self.last_source = "sample"
-            self.last_error = f"{self.last_error}; Sina 失败：{exc}"
-            return self.fallback.bars(symbol=symbol, period=period, adjust=adjust)
-
-
 class MarketDataManager:
     provider_name = "auto"
     description = "自动选择真实行情源"
@@ -802,7 +844,10 @@ class MarketDataManager:
         normalized = symbol.strip()
         provider = self._provider()
         candidates: list[MarketDataProvider] = [provider]
-        for fallback in [self.akshare, self.sina, self.efinance, self.tencent, self.baostock, self.sample]:
+        fallbacks: list[MarketDataProvider] = [self.sina, self.tencent, self.efinance, self.baostock, self.sample]
+        if _akshare_enabled():
+            fallbacks.insert(0, self.akshare)
+        for fallback in fallbacks:
             if fallback not in candidates:
                 candidates.append(fallback)
         for candidate in candidates:
@@ -822,7 +867,10 @@ class MarketDataManager:
     def stocks(self) -> list[StockInfo]:
         configured = self._provider()
         candidates: list[MarketDataProvider] = [configured]
-        for fallback in [self.akshare, self.efinance, self.sina, self.tencent, self.baostock, self.sample]:
+        fallbacks: list[MarketDataProvider] = [self.efinance, self.sina, self.tencent, self.baostock, self.sample]
+        if _akshare_enabled():
+            fallbacks.insert(0, self.akshare)
+        for fallback in fallbacks:
             if fallback not in candidates:
                 candidates.append(fallback)
         for candidate in candidates:
@@ -860,7 +908,13 @@ class MarketDataManager:
                 self._tushare_token = token
                 self.tushare = TushareMarketDataProvider(token=token, fallback=self.sample)
             return self.tushare
-        return self.akshare
+        if configured == "akshare":
+            if _akshare_enabled():
+                return self.akshare
+            self.tencent.last_source = "tencent"
+            self.tencent.last_error = "AkShare 默认关闭，已改用 Tencent/Sina 安全数据源；如确需 AkShare，请设置 ENABLE_AKSHARE=1"
+            return self.tencent
+        return self.tencent
 
     def _stored_tushare_token(self) -> str:
         with get_connection() as connection:
@@ -902,8 +956,10 @@ def market_status() -> MarketStatus:
         description = "BaoStock 真实行情"
     elif market_data.last_source == "tencent":
         description = "Tencent 真实行情"
-    elif settings.provider in {"auto", "akshare"}:
-        description = "AkShare 失败，已回退示例数据"
+    elif settings.provider == "auto":
+        description = "自动数据源失败，已回退示例数据"
+    elif settings.provider == "akshare":
+        description = "AkShare 未启用或失败，已回退备用源"
     elif settings.provider == "tushare":
         description = "Tushare 失败，已回退备用源"
     elif settings.provider == "efinance":
