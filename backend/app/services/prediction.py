@@ -61,6 +61,23 @@ def _format_bytes(size: int) -> str:
     return f"{size / 1024 / 1024 / 1024:.1f}GB"
 
 
+def _windows_platform_patch_script() -> str:
+    return dedent(
+        """
+        import collections
+        import sys
+        if sys.platform == "win32":
+            import platform
+            platform.win32_ver = lambda *args, **kwargs: ("", "", "", "")
+            _UnameResult = collections.namedtuple("uname_result", "system node release version machine processor")
+            platform.uname = lambda: _UnameResult("Windows", "", "", "", "AMD64", "")
+            platform.machine = lambda: "AMD64"
+            if hasattr(platform, "_wmi_query"):
+                platform._wmi_query = lambda *args, **kwargs: {}
+        """
+    )
+
+
 class PredictionService:
     def __init__(self) -> None:
         init_db()
@@ -134,7 +151,14 @@ class PredictionService:
                 r".kronos_runtime\.venv\Scripts\python.exe -m pip install -r .kronos_runtime\Kronos\requirements.txt",
                 (
                     r".kronos_runtime\.venv\Scripts\python.exe -c "
-                    f"\"from huggingface_hub import snapshot_download; snapshot_download({model!r}); snapshot_download({DEFAULT_TOKENIZER!r})\""
+                    "\"import collections, sys; "
+                    "import platform; "
+                    "platform.win32_ver=lambda *a, **k: ('','','',''); "
+                    "U=collections.namedtuple('uname_result','system node release version machine processor'); "
+                    "platform.uname=lambda: U('Windows','','','','AMD64',''); "
+                    "platform.machine=lambda: 'AMD64'; "
+                    "setattr(platform, '_wmi_query', lambda *a, **k: {}); "
+                    f"from huggingface_hub import snapshot_download; snapshot_download({model!r}); snapshot_download({DEFAULT_TOKENIZER!r})\""
                 ),
             ]
         return [
@@ -270,7 +294,7 @@ class PredictionService:
         )
 
     def _prepare_model_cache(self, python: str) -> None:
-        script = (
+        script = _windows_platform_patch_script() + (
             "from huggingface_hub import snapshot_download\n"
             f"snapshot_download({self.settings().model_name!r})\n"
             f"snapshot_download({DEFAULT_TOKENIZER!r})\n"
@@ -470,11 +494,8 @@ class PredictionService:
         python = self._venv_python()
         if not self._pip_ready(python):
             raise RuntimeError("虚拟环境 pip 不可用。请先执行安装命令中的 ensurepip 和 pip upgrade。")
-        script = (
+        script = _windows_platform_patch_script() + (
             "import sys\n"
-            "import platform\n"
-            "if sys.platform == 'win32':\n"
-            "    platform.win32_ver = lambda *args, **kwargs: ('', '', '', '')\n"
             "from huggingface_hub import snapshot_download\n"
             f"sys.path.insert(0, {str(REPO_PATH)!r})\n"
             "import pandas\n"
@@ -560,62 +581,50 @@ class PredictionService:
 
     def _write_runner(self) -> None:
         RUNTIME_PATH.mkdir(parents=True, exist_ok=True)
-        RUNNER_PATH.write_text(
-            dedent(
-                f"""
-                import json
-                import platform
-                import sys
-                from pathlib import Path
-
-                if sys.platform == "win32":
-                    platform.win32_ver = lambda *args, **kwargs: ("", "", "", "")
-
-                import pandas as pd
-
-                sys.path.insert(0, {str(REPO_PATH)!r})
-                from model import Kronos, KronosTokenizer, KronosPredictor
-
-                payload = json.loads(sys.stdin.read())
-                history = payload["history"]
-                df = pd.DataFrame(history)
-                df["timestamp"] = pd.to_datetime(df["timestamp"].where(df["timestamp"].str.contains(" "), df["trade_date"]))
-                x_df = df[["open", "high", "low", "close", "volume", "amount"]].tail(512).reset_index(drop=True)
-                x_timestamp = df["timestamp"].tail(512).reset_index(drop=True)
-                last_ts = x_timestamp.iloc[-1]
-                y_timestamp = pd.bdate_range(last_ts + pd.Timedelta(days=1), periods=payload["horizon"])
-
-                tokenizer = KronosTokenizer.from_pretrained(payload["tokenizer_name"])
-                model = Kronos.from_pretrained(payload["model_name"])
-                predictor = KronosPredictor(model, tokenizer, max_context=512)
-                pred = predictor.predict(
-                    df=x_df,
-                    x_timestamp=x_timestamp,
-                    y_timestamp=pd.Series(y_timestamp),
-                    pred_len=payload["horizon"],
-                    T=1.0,
-                    top_p=0.9,
-                    sample_count=1,
-                )
-                pred = pred.reset_index(drop=True)
-                rows = []
-                for index, ts in enumerate(y_timestamp):
-                    row = pred.iloc[index]
-                    rows.append({{
-                        "trade_date": ts.date().isoformat(),
-                        "timestamp": ts.date().isoformat(),
-                        "open": float(row["open"]),
-                        "high": float(row["high"]),
-                        "low": float(row["low"]),
-                        "close": float(row["close"]),
-                        "volume": float(row.get("volume", 0)),
-                        "amount": float(row.get("amount", 0)),
-                    }})
-                print(json.dumps(rows))
-                """
-            ),
-            encoding="utf-8",
+        script = (
+            "import json\n"
+            "import sys\n\n"
+            f"{_windows_platform_patch_script()}\n"
+            "import pandas as pd\n\n"
+            f"sys.path.insert(0, {str(REPO_PATH)!r})\n"
+            "from model import Kronos, KronosTokenizer, KronosPredictor\n\n"
+            "payload = json.loads(sys.stdin.read())\n"
+            "history = payload[\"history\"]\n"
+            "df = pd.DataFrame(history)\n"
+            "df[\"timestamp\"] = pd.to_datetime(df[\"timestamp\"].where(df[\"timestamp\"].str.contains(\" \"), df[\"trade_date\"]))\n"
+            "x_df = df[[\"open\", \"high\", \"low\", \"close\", \"volume\", \"amount\"]].tail(512).reset_index(drop=True)\n"
+            "x_timestamp = df[\"timestamp\"].tail(512).reset_index(drop=True)\n"
+            "last_ts = x_timestamp.iloc[-1]\n"
+            "y_timestamp = pd.bdate_range(last_ts + pd.Timedelta(days=1), periods=payload[\"horizon\"])\n\n"
+            "tokenizer = KronosTokenizer.from_pretrained(payload[\"tokenizer_name\"])\n"
+            "model = Kronos.from_pretrained(payload[\"model_name\"])\n"
+            "predictor = KronosPredictor(model, tokenizer, max_context=512)\n"
+            "pred = predictor.predict(\n"
+            "    df=x_df,\n"
+            "    x_timestamp=x_timestamp,\n"
+            "    y_timestamp=pd.Series(y_timestamp),\n"
+            "    pred_len=payload[\"horizon\"],\n"
+            "    T=1.0,\n"
+            "    top_p=0.9,\n"
+            "    sample_count=1,\n"
+            ")\n"
+            "pred = pred.reset_index(drop=True)\n"
+            "rows = []\n"
+            "for index, ts in enumerate(y_timestamp):\n"
+            "    row = pred.iloc[index]\n"
+            "    rows.append({\n"
+            "        \"trade_date\": ts.date().isoformat(),\n"
+            "        \"timestamp\": ts.date().isoformat(),\n"
+            "        \"open\": float(row[\"open\"]),\n"
+            "        \"high\": float(row[\"high\"]),\n"
+            "        \"low\": float(row[\"low\"]),\n"
+            "        \"close\": float(row[\"close\"]),\n"
+            "        \"volume\": float(row.get(\"volume\", 0)),\n"
+            "        \"amount\": float(row.get(\"amount\", 0)),\n"
+            "    })\n"
+            "print(json.dumps(rows))\n"
         )
+        RUNNER_PATH.write_text(script, encoding="utf-8")
 
 
 prediction_service = PredictionService()

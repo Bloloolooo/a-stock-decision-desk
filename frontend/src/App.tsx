@@ -447,7 +447,7 @@ function HomePage(props: {
     const takeProfit1 = validPrice(plan?.take_profit_1 ?? props.risk?.take_profit_1);
     const takeProfit2 = validPrice(plan?.take_profit_2 ?? props.risk?.take_profit_2);
     const trailingStop = validPrice(plan?.trailing_stop ?? props.risk?.trailing_stop);
-    return [
+    const baseLevels = [
       buySupport ? { key: "buy_support" as const, label: "支撑买入", price: buySupport, color: "#4ea4ff" } : null,
       buyPullback ? { key: "buy_pullback" as const, label: "回踩买入", price: buyPullback, color: "#8ecae6" } : null,
       buyBreakout ? { key: "buy_breakout" as const, label: "突破买入", price: buyBreakout, color: "#c084fc" } : null,
@@ -456,7 +456,8 @@ function HomePage(props: {
       takeProfit1 ? { key: "take_profit_1" as const, label: "止盈1", price: takeProfit1, color: "#f0b84f" } : null,
       takeProfit2 ? { key: "take_profit_2" as const, label: "止盈2", price: takeProfit2, color: "#d94b42" } : null,
     ].filter((item): item is TradeLevel => item !== null);
-  }, [props.decision?.support_price, props.decision?.trading_plan, props.risk?.stop_loss_price, props.risk?.take_profit_1, props.risk?.take_profit_2, props.risk?.trailing_stop]);
+    return refreshTradeLevels(baseLevels, props.bars);
+  }, [props.bars, props.decision?.support_price, props.decision?.trading_plan, props.risk?.stop_loss_price, props.risk?.take_profit_1, props.risk?.take_profit_2, props.risk?.trailing_stop]);
   const [cashValue, setCashValue] = useState(moneyInput(props.summary.cash));
   const [positionForm, setPositionForm] = useState({
     symbol: "",
@@ -899,6 +900,56 @@ function validPrice(value: number | null | undefined) {
   return value;
 }
 
+function roundPrice(value: number) {
+  return Math.max(0.01, Math.round(value * 100) / 100);
+}
+
+function localAtr(bars: PriceBar[], window = 14) {
+  if (bars.length < 2) return 0;
+  const scoped = bars.slice(Math.max(1, bars.length - window));
+  const ranges = scoped.map((bar, offset) => {
+    const index = bars.length - scoped.length + offset;
+    const previousClose = bars[index - 1]?.close ?? bar.close;
+    return Math.max(
+      bar.high - bar.low,
+      Math.abs(bar.high - previousClose),
+      Math.abs(bar.low - previousClose),
+    );
+  });
+  return ranges.reduce((sum, value) => sum + value, 0) / ranges.length;
+}
+
+function refreshTradeLevels(levels: TradeLevel[], bars: PriceBar[]) {
+  if (levels.length === 0 || bars.length < 3) return levels;
+  const latest = bars[bars.length - 1];
+  const recent10 = bars.slice(-10);
+  const recent5 = bars.slice(-5);
+  const atr = localAtr(bars) || Math.max(latest.close * 0.02, 0.01);
+  const recentLow = Math.min(...recent10.map((bar) => bar.low));
+  const recentHigh = Math.max(...recent5.map((bar) => bar.high));
+  const close = latest.close;
+  const ma5 = recent5.reduce((sum, bar) => sum + bar.close, 0) / recent5.length;
+  const support = Math.min(close * 0.995, Math.max(recentLow, close - atr * 1.15));
+  const pullback = Math.min(close * 0.998, Math.max(ma5, close - atr * 0.65));
+  const breakout = Math.max(close * 1.003, recentHigh * 1.002);
+  const stop = Math.min(close * 0.985, close - Math.max(atr * 1.35, close * 0.018));
+  const entry = close >= ma5 ? pullback : support;
+  const risk = Math.max(entry - stop, atr * 0.5, close * 0.01);
+  const targets = {
+    buy_support: support,
+    buy_pullback: pullback,
+    buy_breakout: breakout,
+    stop,
+    trailing_stop: Math.max(stop, close - Math.max(atr * 1.1, close * 0.014)),
+    take_profit_1: Math.max(close * 1.006, entry + risk),
+    take_profit_2: Math.max(close * 1.012, entry + risk * 2),
+  } satisfies Record<TradeLevel["key"], number>;
+  return levels.map((level) => ({
+    ...level,
+    price: roundPrice(targets[level.key]),
+  }));
+}
+
 function movingAverage(values: number[], window: number) {
   return values.map((_, index) => {
     if (index + 1 < window) return null;
@@ -1258,7 +1309,8 @@ function KLineChart({ bars, mode = "normal", tradeLevels = [] }: { bars: PriceBa
     const chart = createChart(container, {
       layout: { background: { type: ColorType.Solid, color: "#0f1724" }, textColor: "#9aa8bd" },
       grid: { vertLines: { color: "#1c2940" }, horzLines: { color: "#1c2940" } },
-      rightPriceScale: { borderColor: "#253145", minimumWidth: priceScaleWidth, scaleMargins: { top: 0.06, bottom: 0.08 } },
+      leftPriceScale: { visible: true, borderColor: "#253145", minimumWidth: priceScaleWidth, scaleMargins: { top: 0.06, bottom: 0.08 } },
+      rightPriceScale: { visible: false },
       timeScale: { borderColor: "#253145", timeVisible: true, secondsVisible: false },
       crosshair: { mode: 1, vertLine: { color: "#50647f", style: LineStyle.Dashed }, horzLine: { color: "#50647f", style: LineStyle.Dashed } },
       width: container.clientWidth,
@@ -1271,7 +1323,8 @@ function KLineChart({ bars, mode = "normal", tradeLevels = [] }: { bars: PriceBa
       chart.applyOptions({
         width,
         height,
-        rightPriceScale: { minimumWidth: width < 560 ? 52 : 64 },
+        leftPriceScale: { visible: true, minimumWidth: width < 560 ? 52 : 64 },
+        rightPriceScale: { visible: false },
       });
     });
     resizeObserver.observe(container);
@@ -1323,12 +1376,12 @@ function KLineChart({ bars, mode = "normal", tradeLevels = [] }: { bars: PriceBa
     if (chartData.length === 0) return undefined;
     let primaryPriceSeries: ChartSeries | null = null;
     if (isMinuteChart) {
-      const lineSeries = chart.addLineSeries({ color: "#69a8ff", lineWidth: 2, priceScaleId: "right", priceFormat });
+      const lineSeries = chart.addLineSeries({ color: "#69a8ff", lineWidth: 2, priceScaleId: "left", priceFormat });
       lineSeries.setData(lineData);
       mainSeriesRef.current.push(lineSeries);
       primaryPriceSeries = lineSeries;
       if (mainChart === "standard") {
-        const vwapSeries = chart.addLineSeries({ color: "#f0c04f", lineWidth: 1, priceScaleId: "right", priceFormat });
+        const vwapSeries = chart.addLineSeries({ color: "#f0c04f", lineWidth: 1, priceScaleId: "left", priceFormat });
         vwapSeries.setData(vwapData);
         mainSeriesRef.current.push(vwapSeries);
       }
@@ -1341,7 +1394,7 @@ function KLineChart({ bars, mode = "normal", tradeLevels = [] }: { bars: PriceBa
         borderDownColor: "#14a06f",
         wickUpColor: "#d94b42",
         wickDownColor: "#14a06f",
-        priceScaleId: "right",
+        priceScaleId: "left",
         priceFormat,
       });
       candleSeries.setData(chartData);
@@ -1350,7 +1403,7 @@ function KLineChart({ bars, mode = "normal", tradeLevels = [] }: { bars: PriceBa
       if (mainChart === "standard") {
         const maColors: Record<number, string> = { 5: "#f4d35e", 10: "#8ecae6", 20: "#c084fc", 60: "#f59e0b" };
         maData.forEach((ma) => {
-          const series = chart.addLineSeries({ color: maColors[ma.window], lineWidth: 1, priceFormat, priceLineVisible: false, lastValueVisible: false });
+          const series = chart.addLineSeries({ color: maColors[ma.window], lineWidth: 1, priceScaleId: "left", priceFormat, priceLineVisible: false, lastValueVisible: false });
           series.setData(ma.data);
           mainSeriesRef.current.push(series);
         });
@@ -1358,9 +1411,9 @@ function KLineChart({ bars, mode = "normal", tradeLevels = [] }: { bars: PriceBa
     }
     if (mainChart === "boll" || mainChart === "bbiboll") {
       const activeBand = mainChart === "boll" ? bollData : bbiBollData;
-      const upperSeries = chart.addLineSeries({ color: "#f0b84f", lineWidth: 1, lineStyle: LineStyle.Dashed, priceFormat, priceLineVisible: false, lastValueVisible: false });
-      const middleSeries = chart.addLineSeries({ color: "#8ecae6", lineWidth: 2, priceFormat, priceLineVisible: false, lastValueVisible: false });
-      const lowerSeries = chart.addLineSeries({ color: "#f0b84f", lineWidth: 1, lineStyle: LineStyle.Dashed, priceFormat, priceLineVisible: false, lastValueVisible: false });
+      const upperSeries = chart.addLineSeries({ color: "#f0b84f", lineWidth: 1, lineStyle: LineStyle.Dashed, priceScaleId: "left", priceFormat, priceLineVisible: false, lastValueVisible: false });
+      const middleSeries = chart.addLineSeries({ color: "#8ecae6", lineWidth: 2, priceScaleId: "left", priceFormat, priceLineVisible: false, lastValueVisible: false });
+      const lowerSeries = chart.addLineSeries({ color: "#f0b84f", lineWidth: 1, lineStyle: LineStyle.Dashed, priceScaleId: "left", priceFormat, priceLineVisible: false, lastValueVisible: false });
       upperSeries.setData(activeBand.upper);
       middleSeries.setData(activeBand.middle);
       lowerSeries.setData(activeBand.lower);

@@ -1,8 +1,9 @@
+import py_compile
 import subprocess
 from types import SimpleNamespace
 
 import app.services.prediction as prediction_module
-from app.services.prediction import PredictionService
+from app.services.prediction import PredictionService, _windows_platform_patch_script
 from app.services.market_data import sample_market_data
 
 
@@ -350,3 +351,23 @@ def test_prediction_missing_pip_reports_windows_repair_hint(monkeypatch, tmp_pat
     assert "缺少 pip" in message
     assert "ensurepip" in message
     assert "完整 Python" in message
+
+
+def test_prediction_windows_platform_patch_covers_wmi_calls() -> None:
+    script = _windows_platform_patch_script()
+
+    assert "platform.uname" in script
+    assert "platform.machine" in script
+    assert "_wmi_query" in script
+
+
+def test_prediction_runner_script_is_valid_python(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("STOCK_TOOL_DB_PATH", str(tmp_path / "test.sqlite3"))
+    monkeypatch.setattr(prediction_module, "RUNTIME_PATH", tmp_path / ".kronos_runtime")
+    monkeypatch.setattr(prediction_module, "RUNNER_PATH", tmp_path / ".kronos_runtime" / "predict_once.py")
+    monkeypatch.setattr(prediction_module, "REPO_PATH", tmp_path / ".kronos_runtime" / "Kronos")
+    service = PredictionService()
+
+    service._write_runner()
+
+    py_compile.compile(str(prediction_module.RUNNER_PATH), doraise=True)
